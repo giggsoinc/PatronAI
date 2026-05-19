@@ -1,7 +1,7 @@
 # =============================================================
 # FRAGMENT: scan_authorize_fetch.py.frag
-# VERSION: 1.0.0
-# UPDATED: 2026-05-11
+# VERSION: 1.1.0
+# UPDATED: 2026-05-19
 # OWNER: Giggso Inc (Ravi Venugopal)
 # PURPOSE: At scan start, fetch this user's S3 authorized-provider
 #          list (written by the dashboard's [Authorize] button) and
@@ -14,16 +14,26 @@
 #          Fetched via the presigned GET URL configured in
 #          ~/.patronai/config.json under "authorized_list_url".
 #          (Server's url_refresh_loop mints this alongside the
-#          existing upload URL — extend when wiring this in.)
+#          existing upload URL — wired in v2.1.0 of agent_store.)
 # AUDIT LOG:
 #   v1.0.0  2026-05-11  Initial.
+#   v1.1.0  2026-05-19  Read URL from ~/.patronai/authorized_list_url file
+#                       (written by heartbeat PYREFRESH); _cfg fallback kept.
 # =============================================================
 
 def _fetch_remote_authorized() -> list:
     """Best-effort: pull the per-user authorized list from S3.
     Returns a list of provider strings; empty on any failure so the
     scan still runs with whatever local AUTH_LIST already had."""
-    url = _cfg.get("authorized_list_url", "").strip()
+    url = ""
+    try:
+        url_file = AGENT_DIR / "authorized_list_url"
+        if url_file.exists():
+            url = url_file.read_text().strip()
+    except Exception:
+        pass
+    if not url:
+        url = _cfg.get("authorized_list_url", "").strip()
     if not url:
         return []
     try:

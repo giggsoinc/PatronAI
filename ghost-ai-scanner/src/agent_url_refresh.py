@@ -1,7 +1,7 @@
 # =============================================================
 # FILE: src/agent_url_refresh.py
-# VERSION: 1.0.0
-# UPDATED: 2026-04-25
+# VERSION: 1.1.0
+# UPDATED: 2026-05-19
 # OWNER: Giggso Inc (Ravi Venugopal)
 # PURPOSE: Daily re-mint of presigned URL bundles for every active
 #          hook-agent token. Without this, write URLs baked into the
@@ -13,6 +13,8 @@
 # DEPENDS: store.agent_store, blob_index_store
 # AUDIT LOG:
 #   v1.0.0  2026-04-25  Initial. Step 0 — fix the URL-expiry blocker.
+#   v1.1.0  2026-05-19  Pass recipient_email to write_url_bundle so
+#                       authorized_list_url is minted per-user.
 # =============================================================
 
 import logging
@@ -41,10 +43,11 @@ def refresh_all_tokens(store) -> dict:
     for entry in catalog:
         token   = entry.get("token", "")
         os_type = entry.get("os_type", "mac")
+        email   = entry.get("recipient_email", "")
         if not token:
             continue
         try:
-            ok = store.agent.write_url_bundle(token, os_type)
+            ok = store.agent.write_url_bundle(token, os_type, email)
             if ok:
                 minted += 1
             else:

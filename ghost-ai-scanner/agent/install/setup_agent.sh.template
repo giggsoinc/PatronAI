@@ -241,7 +241,8 @@ import json, os
 b = json.loads("""$BUNDLE""")
 for k, fname in (("heartbeat_put_url","heartbeat_url"),
                  ("scan_put_url","scan_url"),
-                 ("authorized_get_url","authorized_url")):
+                 ("authorized_get_url","authorized_url"),
+                 ("authorized_list_url","authorized_list_url")):
     if b.get(k):
         open(os.path.expanduser("~/.patronai/" + fname), "w").write(b[k])
 PYREFRESH

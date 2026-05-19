@@ -1,7 +1,7 @@
 # =============================================================
 # FILE: src/store/agent_store.py
-# VERSION: 2.0.0
-# UPDATED: 2026-04-25
+# VERSION: 2.1.0
+# UPDATED: 2026-05-19
 # OWNER: Giggso Inc (Ravi Venugopal)
 # PURPOSE: S3-backed catalog for agent delivery packages.
 #          Generates tokens, bcrypt-hashes OTPs, uploads packages,
@@ -23,11 +23,15 @@
 #                       the walked prefix). New write_url_bundle() + urls_refresh_url
 #                       so the laptop refreshes presigned URLs daily — the 7-day
 #                       cliff that was silently killing fleet agents is gone.
+#   v2.1.0  2026-05-19  authorized_list_url — mint presigned GET for the
+#                       dashboard-driven per-user approved-provider list so
+#                       scan_authorize_fetch.py.frag can suppress noise at source.
 # =============================================================
 
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -44,6 +48,13 @@ HOOK_AGENTS_PREFIX = "config/HOOK_AGENTS"
 CATALOG_KEY        = f"{HOOK_AGENTS_PREFIX}/catalog.json"
 PRESIGN_TTL        = 172800   # 48 hours — installer + meta delivery
 HEARTBEAT_PRESIGN_TTL = 604800  # 7 days  — max AWS IAM presigned PUT TTL
+
+_EMAIL_SAFE_RE = re.compile(r"[^a-zA-Z0-9._-]")
+
+
+def _email_safe(email: str) -> str:
+    """Filesystem-safe key segment: replaces @ and specials with _."""
+    return _EMAIL_SAFE_RE.sub("_", (email or "").strip().lower())
 
 
 class AgentStore(BaseStore):
@@ -119,16 +130,15 @@ class AgentStore(BaseStore):
             log.error("create_package failed: %s", e)
             return None
 
-    def get_presigned_urls(self, token: str, os_type: str) -> dict:
-        """
-        Return presigned URLs for client use. Each URL is a time-bound,
-        key-locked S3 capability. Heartbeat lands inside ocsf/ so the
-        ingestor walks it. urls_refresh_url points at a daily-rotated
-        bundle so the agent can pull fresh URLs before the 7-day cliff.
+    def get_presigned_urls(self, token: str, os_type: str, email: str = "") -> dict:
+        """Return presigned URLs for client use.
+
+        Includes authorized_list_url when email is provided — points at the
+        per-user dashboard-driven approved-provider list in S3.
         """
         ext = "ps1" if os_type == "windows" else "sh"
         try:
-            return {
+            d = {
                 "installer_url":       self._sign_get(f"{HOOK_AGENTS_PREFIX}/{token}/setup_agent.{ext}", PRESIGN_TTL),
                 "meta_url":            self._sign_get(f"{HOOK_AGENTS_PREFIX}/{token}/meta.json",           PRESIGN_TTL),
                 "status_put_url":      self._sign_put(f"{HOOK_AGENTS_PREFIX}/{token}/status.json",         PRESIGN_TTL),
@@ -137,6 +147,11 @@ class AgentStore(BaseStore):
                 "authorized_get_url":  self._sign_get(f"{HOOK_AGENTS_PREFIX}/{token}/authorized.csv",      HEARTBEAT_PRESIGN_TTL),
                 "urls_refresh_url":    self._sign_get(f"{HOOK_AGENTS_PREFIX}/{token}/urls.json",           HEARTBEAT_PRESIGN_TTL),
             }
+            if email:
+                d["authorized_list_url"] = self._sign_get(
+                    f"config/authorized/{_email_safe(email)}.json", HEARTBEAT_PRESIGN_TTL,
+                )
+            return d
         except Exception as e:
             log.error("get_presigned_urls failed [%s]: %s", token, e)
             return {}
@@ -155,13 +170,20 @@ class AgentStore(BaseStore):
             ExpiresIn=ttl,
         )
 
-    def write_url_bundle(self, token: str, os_type: str) -> bool:
+    def write_url_bundle(self, token: str, os_type: str, email: str = "") -> bool:
         """Re-mint heartbeat / scan / authorized URLs and write the bundle to S3.
 
-        Called by the daily url_refresh_loop. The bundle excludes urls_refresh_url
-        itself (the agent already has that one and we don't want a chicken-and-egg).
+        Called by the daily url_refresh_loop. Reads email from meta.json when
+        not supplied so authorized_list_url can be minted per-user.
         """
-        urls = self.get_presigned_urls(token, os_type)
+        if not email:
+            try:
+                raw = self._get(f"{HOOK_AGENTS_PREFIX}/{token}/meta.json")
+                if raw:
+                    email = json.loads(raw).get("recipient_email", "")
+            except Exception:
+                pass
+        urls = self.get_presigned_urls(token, os_type, email)
         if not urls:
             return False
         bundle = {
@@ -171,6 +193,8 @@ class AgentStore(BaseStore):
             "scan_put_url":       urls["scan_put_url"],
             "authorized_get_url": urls["authorized_get_url"],
         }
+        if urls.get("authorized_list_url"):
+            bundle["authorized_list_url"] = urls["authorized_list_url"]
         try:
             self._put(f"{HOOK_AGENTS_PREFIX}/{token}/urls.json",
                       json.dumps(bundle).encode(), "application/json")

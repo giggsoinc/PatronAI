@@ -14,6 +14,7 @@
 #   v1.0.0  2026-04-26  Initial. Phase 1A.
 # =============================================================
 
+import os as _os
 import time as _time
 
 # Patterns to match a tool registration. Anchored with word boundaries
@@ -37,28 +38,49 @@ _TOOL_PATTERNS_RE = re.compile(
 
 _PY_MAX_BYTES_PER_FILE = 500_000                       # don't read 5 MB notebooks
 _PY_TIME_CAP_SECONDS   = 30.0                          # whole-scan deadline
+_PY_MAX_DEPTH          = 5                             # don't descend more than 5 levels
+_PY_MAX_FILES_PER_REPO = 500                           # stop collecting after 500 .py files
+
+# Directories pruned BEFORE entering — never traversed at all.
+_SKIP_DIRS = frozenset({
+    "node_modules", ".venv", "venv", "__pycache__", ".git",
+    ".tox", ".eggs", "dist", "build", "site-packages",
+    "__pypackages__", ".mypy_cache", ".pytest_cache", ".nox",
+    "egg-info", ".hg", ".svn",
+})
 
 
 def _python_files_in(repo_root: Path, deadline: float) -> list:
-    """Yield .py files inside a repo, depth-limited, deadline-respecting."""
+    """Collect .py files using os.scandir with early directory pruning
+    and depth limiting. Much faster than rglob on large repos."""
     out: list = []
-    try:
-        for p in repo_root.rglob("*.py"):
-            if _time.time() > deadline:
-                break
-            try:
-                # Skip vendored installs even if a repo accidentally
-                # checked them in.
-                if any(seg in {"node_modules", ".venv", "venv", "__pycache__"}
-                       for seg in p.parts):
+    stack = [(repo_root, 0)]
+    while stack:
+        if _time.time() > deadline:
+            break
+        if len(out) >= _PY_MAX_FILES_PER_REPO:
+            break
+        current, depth = stack.pop()
+        try:
+            entries = _os.scandir(current)
+        except (OSError, PermissionError):
+            continue
+        with entries:
+            for entry in entries:
+                if _time.time() > deadline:
+                    return out
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if depth < _PY_MAX_DEPTH and entry.name not in _SKIP_DIRS \
+                                and not entry.name.endswith(".egg-info"):
+                            stack.append((Path(entry.path), depth + 1))
+                    elif entry.name.endswith(".py"):
+                        if entry.stat().st_size <= _PY_MAX_BYTES_PER_FILE:
+                            out.append(Path(entry.path))
+                            if len(out) >= _PY_MAX_FILES_PER_REPO:
+                                return out
+                except (OSError, PermissionError):
                     continue
-                if p.stat().st_size > _PY_MAX_BYTES_PER_FILE:
-                    continue
-            except Exception:
-                continue
-            out.append(p)
-    except Exception:
-        return out
     return out
 
 

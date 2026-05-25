@@ -63,10 +63,11 @@ class Ingestor:
         unauthorized = load_unauthorized(self._bucket)
 
         if not unauthorized:
-            log.error("Unauthorized list empty — scan aborted")
-            return {"outcome": "aborted", "reason": "empty unauthorized list"}
+            log.error("Unauthorized list empty — domain/port matching disabled this cycle")
 
-        # Build pipeline with fresh lists
+        # Build pipeline with fresh lists (pipeline handles empty unauthorized gracefully:
+        # ENDPOINT_SCAN events are pre-classified and bypass the matcher entirely,
+        # so endpoint inventory continues even when the unauthorized list is missing)
         pipeline = Pipeline(
             store=self._store,
             authorized=authorized,

@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -44,6 +45,10 @@ HOOK_AGENTS_PREFIX = "config/HOOK_AGENTS"
 CATALOG_KEY        = f"{HOOK_AGENTS_PREFIX}/catalog.json"
 PRESIGN_TTL        = 172800   # 48 hours — installer + meta delivery
 HEARTBEAT_PRESIGN_TTL = 604800  # 7 days  — max AWS IAM presigned PUT TTL
+
+# Process-wide lock for catalog read-modify-write. Prevents lost updates
+# when two package generations run concurrently (e.g., two Streamlit sessions).
+_catalog_lock = threading.Lock()
 
 
 class AgentStore(BaseStore):
@@ -260,20 +265,21 @@ class AgentStore(BaseStore):
         os_type: str,
         created_at: str,
     ) -> None:
-        """Append a new entry to catalog.json on S3."""
-        catalog = self.list_catalog()
-        catalog.append({
-            "token":           token,
-            "recipient_name":  recipient_name,
-            "recipient_email": recipient_email,
-            "os_type":         os_type,
-            "created_at":      created_at,
-            "status":          "pending",
-        })
-        try:
-            self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(), "application/json")
-        except Exception as e:
-            log.error("_catalog_add write failed: %s", e)
+        """Append a new entry to catalog.json on S3 under a process-wide lock."""
+        with _catalog_lock:
+            catalog = self.list_catalog()
+            catalog.append({
+                "token":           token,
+                "recipient_name":  recipient_name,
+                "recipient_email": recipient_email,
+                "os_type":         os_type,
+                "created_at":      created_at,
+                "status":          "pending",
+            })
+            try:
+                self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(), "application/json")
+            except Exception as e:
+                log.error("_catalog_add write failed: %s", e)
 
     def delete_package(self, token: str, os_type: str = "") -> bool:
         """
@@ -283,6 +289,7 @@ class AgentStore(BaseStore):
         """
         prefix = f"{HOOK_AGENTS_PREFIX}/{token}/"
         try:
+            total_deleted = 0
             paginator = self.s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
                 objects = [{"Key": o["Key"]} for o in page.get("Contents", [])]
@@ -291,10 +298,12 @@ class AgentStore(BaseStore):
                         Bucket=self.bucket,
                         Delete={"Objects": objects, "Quiet": True},
                     )
-            catalog = [e for e in self.list_catalog() if e["token"] != token]
-            self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(),
-                      "application/json")
-            log.info("delete_package: purged prefix %s (%d objects)", prefix, len(objects) if 'objects' in dir() else 0)
+                    total_deleted += len(objects)
+            with _catalog_lock:
+                catalog = [e for e in self.list_catalog() if e["token"] != token]
+                self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(),
+                          "application/json")
+            log.info("delete_package: purged prefix %s (%d objects)", prefix, total_deleted)
             return True
         except Exception as e:
             log.error("delete_package failed [%s]: %s", token, e)

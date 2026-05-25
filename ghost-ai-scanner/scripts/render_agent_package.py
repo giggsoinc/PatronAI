@@ -187,8 +187,15 @@ def render_agent_package(
         return {"success": False, "error": str(e)}
 
     # ── EC2-side artifact builds ──────────────────────────────
-    dmg_key = _build_macos_dmg(sh_script,  recipient_name, token, store)
-    exe_key = _build_windows_exe(ps1_script, recipient_name, token, store)
+    dmg_key, exe_key = "", ""
+    try:
+        dmg_key = _build_macos_dmg(sh_script,  recipient_name, token, store)
+    except Exception as e:
+        log.error("DMG build failed for token %s: %s", token[:8], e)
+    try:
+        exe_key = _build_windows_exe(ps1_script, recipient_name, token, store)
+    except Exception as e:
+        log.error("EXE build failed for token %s: %s", token[:8], e)
 
     dmg_url = store.get_artifact_url(dmg_key) if dmg_key else ""
     exe_url = store.get_artifact_url(exe_key) if exe_key else ""

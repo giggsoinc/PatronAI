@@ -7,10 +7,10 @@
 # USAGE: powershell -ExecutionPolicy Bypass -File setup_agent.ps1
 # REQUIRES: PowerShell 5.1+, Python 3 (with bcrypt installed)
 # =============================================================
-$ErrorActionPreference = "Stop"
-
 # Bug #7 fix: accept OTP as parameter for non-interactive (EXE) installs
 param([string]$Otp)
+
+$ErrorActionPreference = "Stop"
 
 $MetaUrl           = "{{META_URL}}"
 $StatusPutUrl      = "{{STATUS_PUT_URL}}"
@@ -125,6 +125,9 @@ $Config = @{
 } | ConvertTo-Json
 Write-Utf8NoBom $ConfigPath $Config
 
+# Persist validated Python path so runtime scripts use the same interpreter.
+Write-Utf8NoBom (Join-Path $AgentDir "python_path.txt") $PyExe
+
 # Persist presigned URLs + URL-refresh endpoint + authorised list fallback.
 $HeartbeatPutUrl   | Set-Content -Path (Join-Path $AgentDir "heartbeat_url.txt")      -Encoding UTF8
 $ScanPutUrl        | Set-Content -Path (Join-Path $AgentDir "scan_url.txt")            -Encoding UTF8
@@ -237,7 +240,9 @@ if (Test-Path $AuthUrlFile) {
 $env:PATRONAI_TOKEN   = $Cfg.token
 $env:PATRONAI_COMPANY = $Cfg.company
 $ScanPy = Join-Path $AgentDir "scan.py"
-$Result = python $ScanPy
+$PyPath = Join-Path $AgentDir "python_path.txt"
+$Py = if (Test-Path $PyPath) { (Get-Content $PyPath).Trim() } else { "python" }
+$Result = & $Py $ScanPy
 
 if ($Result) {
     try {
@@ -377,11 +382,11 @@ function Register-PatronAITask($TaskName, $ScriptPath, $IntervalMinutes, $Desc) 
 </Task>
 "@
     try {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false -ErrorAction SilentlyContinue
-        Register-ScheduledTask -TaskName $TaskName -Xml `$Xml -Force | Out-Null
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Register-ScheduledTask -TaskName $TaskName -Xml $Xml -Force | Out-Null
         Write-Info "$TaskName registered (every $IntervalMinutes min)."
     } catch {
-        Write-Info "$TaskName registration failed: `$_"
+        Write-Info "$TaskName registration failed: $_"
     }
 }
 
@@ -411,3 +416,5 @@ Write-Info "Heartbeat every 5 min — refreshes presigned URLs AND auto-installs
 Write-Info "                       in any new git repo cloned/init-ed since the last cycle."
 Write-Info "AI framework signals in git commits will be forwarded for analysis."
 Write-Info "If anything looks off later, run:  powershell -File ~/.patronai/diagnose.ps1"
+Write-Host ""
+Read-Host "Press Enter to close this window"

@@ -22,7 +22,9 @@
 # DEPENDS: normalizer, matcher, blob_index_store
 # =============================================================
 
+import json
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger("marauder-scan.ingestor.pipeline")
@@ -131,25 +133,23 @@ class Pipeline:
 
     def _update_agent_status(self, event: dict) -> None:
         """Update agent status.json in S3 to 'uninstalled' when UNINSTALLED event received."""
-        import json as _json
-        from datetime import datetime, timezone
         try:
-            notes = _json.loads(event.get("notes", "{}"))
+            notes = json.loads(event.get("notes", "{}"))
             token = notes.get("token", "")
             if not token:
                 return
-            status_key = f"config/HOOK_AGENTS/{token}/status.json"
+            now = datetime.now(timezone.utc).isoformat()
             status = {
                 "token":          token,
                 "status":         "uninstalled",
                 "event_type":     "UNINSTALLED",
                 "device_id":      event.get("src_hostname", ""),
                 "email":          event.get("email", ""),
-                "timestamp":      event.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                "uninstalled_at": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                "updated_at":     datetime.now(timezone.utc).isoformat(),
+                "timestamp":      event.get("timestamp", now),
+                "uninstalled_at": event.get("timestamp", now),
+                "updated_at":     now,
             }
-            self._store._put(status_key, _json.dumps(status).encode(), "application/json")
+            self._store.agent.write_agent_status(token, status)
             log.info("Agent status updated to 'uninstalled' for token=%s", token[:8])
         except Exception as e:
             log.error("_update_agent_status failed: %s", e)

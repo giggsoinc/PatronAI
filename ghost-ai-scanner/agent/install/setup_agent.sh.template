@@ -110,6 +110,10 @@ print(json.dumps({
 PYCFG
 chmod 600 "$AGENT_DIR/config.json"
 
+# Persist validated Python path so runtime scripts use the same interpreter.
+echo "$PY" > "$AGENT_DIR/python_path"
+chmod 600 "$AGENT_DIR/python_path"
+
 # Persist presigned URLs + URL-refresh endpoint + authorised list fallback.
 # URL files are rotated daily by heartbeat.sh fetching urls.json — see Step 0.
 echo "$HEARTBEAT_PUT_URL"  > "$AGENT_DIR/heartbeat_url"
@@ -138,13 +142,14 @@ cat > "$HOOK_SCRIPT" << 'HOOK_EOF'
 AGENT_DIR="$HOME/.patronai"
 CONFIG="$AGENT_DIR/config.json"
 [ -f "$CONFIG" ] || exit 0
-# Single python3 call to read all config fields at once
+# Single python3 call to read all config fields at once.
+# shlex.quote() handles any special chars (spaces, quotes, etc.) safely.
 eval $(python3 -c "
-import json
+import json, shlex
 c = json.load(open('$CONFIG'))
-print(f\"BUCKET={c['bucket']}\")
-print(f\"REGION={c['region']}\")
-print(f\"COMPANY={c['company']}\")
+print('BUCKET=' + shlex.quote(c['bucket']))
+print('REGION=' + shlex.quote(c['region']))
+print('COMPANY=' + shlex.quote(c['company']))
 " 2>/dev/null) || exit 0
 [ -z "$BUCKET" ] && exit 0
 AI_SIGNALS="langchain|langgraph|llama_index|haystack|autogen|crewai|openai|anthropic|pydantic_ai|smolagents|MCPServer|sk-proj-|sk-ant-|hf_[a-zA-Z0-9]"
@@ -230,8 +235,9 @@ AGENT_DIR="$HOME/.patronai"
 [ -f "$AGENT_DIR/scan_url" ]    || exit 0
 SCAN_URL=$(cat "$AGENT_DIR/scan_url")
 [ -z "$SCAN_URL" ] && exit 0
-PATRONAI_TOKEN=$(python3 -c "import json; print(json.load(open('$AGENT_DIR/config.json'))['token'])" 2>/dev/null)
-PATRONAI_COMPANY=$(python3 -c "import json; print(json.load(open('$AGENT_DIR/config.json'))['company'])" 2>/dev/null)
+PY=$(cat "$AGENT_DIR/python_path" 2>/dev/null || echo "python3")
+PATRONAI_TOKEN=$($PY -c "import json; print(json.load(open('$AGENT_DIR/config.json'))['token'])" 2>/dev/null)
+PATRONAI_COMPANY=$($PY -c "import json; print(json.load(open('$AGENT_DIR/config.json'))['company'])" 2>/dev/null)
 export PATRONAI_TOKEN PATRONAI_COMPANY
 
 # Refresh live authorised list from S3 (presigned GET; admin can edit
@@ -242,7 +248,7 @@ if [ -n "$AUTH_URL" ]; then
   [ -n "$LIVE" ] && echo "$LIVE" > "$AGENT_DIR/authorized_domains"
 fi
 
-python3 << 'PYEOF'
+$PY << 'PYEOF'
 {{INLINE_SCAN_PYTHON}}
 PYEOF
 SCAN_EOF

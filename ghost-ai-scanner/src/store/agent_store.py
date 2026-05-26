@@ -275,6 +275,19 @@ class AgentStore(BaseStore):
         except Exception as e:
             log.error("_catalog_add write failed: %s", e)
 
+    def write_agent_status(self, token: str, status: dict) -> bool:
+        """Write agent status.json to S3. Used by the ingestor on lifecycle events."""
+        try:
+            self._put(
+                f"{HOOK_AGENTS_PREFIX}/{token}/status.json",
+                json.dumps(status).encode(),
+                "application/json",
+            )
+            return True
+        except Exception as e:
+            log.error("write_agent_status failed [%s]: %s", token[:8], e)
+            return False
+
     def delete_package(self, token: str, os_type: str = "") -> bool:
         """
         Remove package from catalog and purge ALL S3 objects under the token prefix.

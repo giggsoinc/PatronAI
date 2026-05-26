@@ -26,6 +26,7 @@
 #                       scan_id for grouping back to the source scan.
 # =============================================================
 
+import json
 import logging
 from typing import Optional
 from .schema import empty_event
@@ -149,7 +150,6 @@ def _parse_uninstalled(raw: dict, company: str) -> dict:
     event["timestamp"]    = raw.get("uninstalled_at", raw.get("timestamp", event["timestamp"]))
     event["outcome"]      = "UNINSTALLED"
     event["severity"]     = "LOW"
-    import json
     event["notes"] = json.dumps({
         "event_type":     "UNINSTALLED",
         "token":          raw.get("token", ""),

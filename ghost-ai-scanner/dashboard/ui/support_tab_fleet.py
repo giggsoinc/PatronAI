@@ -93,6 +93,8 @@ def render_fleet(email: str = "") -> None:
             online_count += 1
         elif bucket_key == "offline":
             offline_count += 1
+        elif bucket_key == "uninstalled":
+            pass  # don't count uninstalled as pending
         else:
             pending_count += 1
 

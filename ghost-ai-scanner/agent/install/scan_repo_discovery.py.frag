@@ -19,8 +19,10 @@
 #                       unless-git rule, security hard-blocks.
 # =============================================================
 
+import os
 import time as _time
 import string as _string
+import platform as _platform
 
 # ── Configuration ─────────────────────────────────────────────
 _REPO_MAX_DEPTH   = 6
@@ -96,7 +98,7 @@ _EXCLUDE_HIDDEN_ALWAYS = frozenset({
 # not here — this set only matches on entry.name (final path component).
 
 # ── Helper: detect OS ─────────────────────────────────────────
-_WALKER_OS = platform.system()  # "Windows", "Darwin", "Linux"
+_WALKER_OS = _platform.system()  # "Windows", "Darwin", "Linux"
 
 
 # ── Build candidate roots ─────────────────────────────────────
@@ -112,9 +114,12 @@ def _candidate_roots() -> list:
                 continue
             try:
                 import ctypes
-                if ctypes.windll.kernel32.GetDriveTypeW(str(root)) != 3:
+                # Drive type 3 = DRIVE_FIXED. In WSL2 environment, this may fail gracefully.
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(str(root))
+                if drive_type != 3:
                     continue
-            except Exception:
+            except (OSError, AttributeError, TypeError) as e:
+                # WSL2 environment or missing ctypes; skip type check and probe anyway
                 pass
             for name in _EXTRA_ROOTS_WIN_DRIVE_RELATIVE:
                 p = root / name
@@ -159,7 +164,10 @@ def _candidate_roots() -> list:
                     if m.is_dir() and not m.is_symlink():
                         roots.append(m)
         # WSL detection — probe all single-letter Windows drives mounted under /mnt
-        if Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists():
+        # WSL2 has WSLInterop marker; WSL1 sets WSL_DISTRO_NAME env var
+        is_wsl2 = Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists()
+        is_wsl1 = not is_wsl2 and os.environ.get("WSL_DISTRO_NAME") is not None
+        if is_wsl2 or is_wsl1:
             mnt = Path("/mnt")
             if mnt.exists():
                 for entry in mnt.iterdir():

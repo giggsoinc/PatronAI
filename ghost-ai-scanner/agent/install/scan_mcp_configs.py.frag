@@ -51,7 +51,7 @@ def _hash_file_bytes(p: Path) -> str:
     """Compute SHA-256 of a file's raw bytes, or '' on read error."""
     try:
         return hashlib.sha256(p.read_bytes()).hexdigest()
-    except Exception:
+    except Exception:  # intentional: must not crash
         return ""
 
 
@@ -86,7 +86,7 @@ def _parse_one_config(host: str, path: Path) -> list:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
     servers = data.get("mcpServers") or {}
     if not isinstance(servers, dict) or not servers:
@@ -122,6 +122,6 @@ def scan_mcp_configs() -> list:
     for host, path in _mcp_config_paths():
         try:
             findings.extend(_parse_one_config(host, path))
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue                                  # never crash a scan
     return findings

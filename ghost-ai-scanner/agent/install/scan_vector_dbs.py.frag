@@ -61,7 +61,7 @@ def _emit_finding(p: Path, kind: str, source: str) -> dict:
     try:
         size = p.stat().st_size if p.is_file() else 0
         mtime = int(p.stat().st_mtime)
-    except Exception:
+    except Exception:  # intentional: must not crash
         size, mtime = 0, 0
     return _safe_finding({
         "type":          "vector_db",
@@ -92,7 +92,7 @@ def _scan_home_caches() -> list:
                     out.append(f)
                 if len(out) >= _VDB_MAX_FINDINGS:
                     return out
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
     return out
 
@@ -120,7 +120,7 @@ def _scan_repos_for_vector_files() -> list:
                     out.append(f)
                 if len(out) >= _VDB_MAX_FINDINGS:
                     return out
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
     return out
 

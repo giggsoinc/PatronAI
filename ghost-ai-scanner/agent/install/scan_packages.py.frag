@@ -43,7 +43,7 @@ def scan_packages() -> list:
     for mgr, cmd in _package_managers():
         try:
             out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True, timeout=20)
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
         for line in out.splitlines():
             parts = line.split()

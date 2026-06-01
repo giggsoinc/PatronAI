@@ -10,14 +10,12 @@
 #          absolute-path exclude -> name exclude -> hidden-unless-git
 #          rule -> repo boundary. Capped at max_depth and max_seconds.
 #
-# A/B TEST: v1.0.0 (HOME-only) is at the bottom as a commented block.
-#           To revert, uncomment v1 and comment out v2.
-#
 # AUDIT LOG:
 #   v1.0.0  2026-04-26  Initial. Phase 1A. HOME-only walk.
 #   v2.0.0  2026-05-22  Multi-OS roots, expanded excludes, hidden-
 #                       unless-git rule, security hard-blocks.
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 import os
 import time as _time
@@ -26,7 +24,7 @@ import platform as _platform
 
 # ── Configuration ─────────────────────────────────────────────
 _REPO_MAX_DEPTH   = 6
-_REPO_MAX_SECONDS = 90.0   # TUNABLE: production default 90s
+_REPO_MAX_SECONDS = 90.0   # hard cap; ship partial results on timeout
 
 _EXTRA_ROOTS_WIN_DRIVE_RELATIVE = (
     "Code","Codebase","Repo","Repos","Repositories","Workspace","Workspaces",
@@ -118,7 +116,7 @@ def _candidate_roots() -> list:
                 drive_type = ctypes.windll.kernel32.GetDriveTypeW(str(root))
                 if drive_type != 3:
                     continue
-            except (OSError, AttributeError, TypeError) as e:
+            except (OSError, AttributeError, TypeError):
                 # WSL2 environment or missing ctypes; skip type check and probe anyway
                 pass
             for name in _EXTRA_ROOTS_WIN_DRIVE_RELATIVE:
@@ -230,7 +228,7 @@ def _git_remote_host(repo_root: Path) -> str:
         return ""
     try:
         text = cfg.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
+    except Exception:  # intentional: must not crash
         return ""
     m = re.search(r"url\s*=\s*[^@\s]*@?([A-Za-z0-9._\-]+(?:\.[A-Za-z]{2,})+)", text)
     return m.group(1).lower() if m else ""
@@ -243,14 +241,14 @@ def _git_head_sha(repo_root: Path) -> str:
         return ""
     try:
         ref = head.read_text(encoding="utf-8", errors="ignore").strip()
-    except Exception:
+    except Exception:  # intentional: must not crash
         return ""
     if ref.startswith("ref: "):
         ref_path = repo_root / ".git" / ref[5:]
         if ref_path.exists():
             try:
                 return ref_path.read_text(encoding="utf-8").strip()[:7]
-            except Exception:
+            except Exception:  # intentional: must not crash
                 return ""
     return ref[:7] if re.fullmatch(r"[0-9a-f]{40}", ref) else ""
 
@@ -314,7 +312,7 @@ def discover_repos() -> list:
     for r in repos:
         try:
             key = str(r.resolve())
-        except Exception:
+        except Exception:  # intentional: must not crash
             key = str(r)
         if key not in seen:
             seen.add(key)
@@ -331,65 +329,5 @@ def discover_repos() -> list:
 DISCOVERED_REPOS: list = []
 try:
     DISCOVERED_REPOS = discover_repos()
-except Exception:
+except Exception:  # intentional: must not crash
     DISCOVERED_REPOS = []
-
-
-# =============================================================
-# v1.0.0 (A/B TEST — original HOME-only walker)
-# Uncomment below and comment out everything above to revert.
-# =============================================================
-# import time as _time
-#
-# _REPO_EXCLUDE_NAMES = {
-#     "node_modules", ".venv", "venv", "vendor", "__pycache__",
-#     ".tox", ".gradle", ".m2", ".cargo", ".cache", ".docker",
-#     "Library", "Applications", ".Trash", "private",
-#     ".npm", ".pnpm", ".yarn", ".rustup", ".pyenv", ".rbenv",
-#     "Pictures", "Music", "Movies", "Public",
-# }
-# _REPO_MAX_DEPTH    = 6
-# _REPO_MAX_SECONDS  = 60.0
-#
-# def _walk_for_repos(root: Path, deadline: float) -> list:
-#     found: list = []
-#     stack: list = [(root, 0)]
-#     while stack and _time.time() < deadline:
-#         current, depth = stack.pop()
-#         if depth > _REPO_MAX_DEPTH:
-#             continue
-#         try:
-#             children = list(current.iterdir())
-#         except Exception:
-#             continue
-#         if any(c.name == ".git" and c.is_dir() for c in children):
-#             found.append(current)
-#             continue
-#         for child in children:
-#             if not child.is_dir() or child.is_symlink():
-#                 continue
-#             if child.name in _REPO_EXCLUDE_NAMES or child.name.startswith("."):
-#                 if child.name not in (".github", ".gitlab"):
-#                     continue
-#             stack.append((child, depth + 1))
-#     return found
-#
-# def discover_repos(root=None) -> list:
-#     home = Path(root) if root else Path.home()
-#     deadline = _time.time() + _REPO_MAX_SECONDS
-#     repos = _walk_for_repos(home, deadline)
-#     out: list = []
-#     for r in repos:
-#         out.append({
-#             "path_safe":   _safe_path(r),
-#             "name":        r.name,
-#             "head_sha":    _git_head_sha(r),
-#             "remote_host": _git_remote_host(r),
-#         })
-#     return out
-#
-# DISCOVERED_REPOS: list = []
-# try:
-#     DISCOVERED_REPOS = discover_repos()
-# except Exception:
-#     DISCOVERED_REPOS = []

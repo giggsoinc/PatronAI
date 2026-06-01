@@ -33,7 +33,7 @@ def _polars_binary_ok() -> bool:
         import polars as _pl
         _pl.DataFrame([{"x": 1}])
         return True
-    except Exception:
+    except Exception:  # intentional: must not crash
         return False
 
 

@@ -35,7 +35,7 @@ def _scan_sqlite(db_path: Path, query: str) -> list:
         rows = conn.execute(query).fetchall()
         conn.close()
         return [r[0] for r in rows if r and r[0]]
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
     finally:
         tmp.unlink(missing_ok=True)

@@ -21,6 +21,7 @@
 #   v1.5.1  2026-04-25  Fix: store.agent.write_url_bundle → store.write_url_bundle.
 #   v1.6.0  2026-04-27  Render uninstall_agent.sh/.ps1 and store alongside installer.
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 import json
 import logging

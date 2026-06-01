@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]   # …/marauder-scan-complete
 # AWS Access Key ID pattern. AKIAIOSFODNN7EXAMPLE is the official AWS
 # documentation example and is allow-listed.
 _AWS_KEY_RE = re.compile(rb"AKIA[A-Z0-9]{16}")
-_ALLOW_KEY  = b"AKIAIOSFODNN7EXAMPLE"
+_ALLOW_KEY  = b"AKIAIOSFODNN7EXAMPLE"  # noqa: SECRET — test data, not a real key
 
 # AWS temporary session token prefix.
 _AWS_TMP_RE = re.compile(rb"ASIA[A-Z0-9]{16}")

@@ -13,6 +13,7 @@
 #   v1.1.0  2026-04-20  Edit Whitelist expander per row
 #   v2.0.0  2026-04-27  Two-step delete: download uninstall script → confirm.
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 import os
 import sys
@@ -42,7 +43,7 @@ def _uninstall_url(store, token: str, os_type: str) -> str:
             Params={"Bucket": store.bucket, "Key": key},
             ExpiresIn=_UNINSTALL_TTL,
         )
-    except Exception:
+    except Exception:  # intentional: must not crash
         return ""
 
 

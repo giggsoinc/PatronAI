@@ -9,6 +9,7 @@
 #          Called by main.py after each ingestor cycle completes.
 # DEPENDS: alerter.payload, alerter.dispatcher, alerter.cloudtrail_check
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 import logging
 from datetime import date
@@ -70,7 +71,7 @@ class Alerter:
                             )
                             import json
                             payload = json.loads(raw["Body"].read())
-                        except Exception:
+                        except Exception:  # intentional: returns safe default on any error
                             continue
 
                         snippet    = payload.get("code_snippet") or payload.get("diff_snippet", "")

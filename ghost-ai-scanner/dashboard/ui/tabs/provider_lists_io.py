@@ -37,7 +37,7 @@ def render_status_banner(status_key: str) -> None:
         s3 = boto3.client("s3", region_name=REGION)
         body = s3.get_object(Bucket=BUCKET, Key=status_key)["Body"].read()
         status = json.loads(body)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return
     if status.get("below_threshold"):
         st.error(
@@ -77,7 +77,7 @@ def _fetch_csv_df(key: str, cols: list) -> pd.DataFrame:
         raw = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
         body = "\n".join(ln for ln in raw.splitlines() if not ln.strip().startswith("#"))
         return pd.read_csv(io.StringIO(body)) if body.strip() else pd.DataFrame(columns=cols)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return pd.DataFrame(columns=cols)
 
 
@@ -91,7 +91,7 @@ def read_validated(key: str, validator) -> list:
     try:
         s3 = boto3.client("s3", region_name=REGION)
         raw = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
     rows, _ = parse_csv_text(raw, validator)
     return rows

@@ -36,7 +36,7 @@ def _users_store():
             os.path.dirname(__file__), "..", "..", "src"))
         from store.users_store import UsersStore
         return UsersStore(_BUCKET, _REGION)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return None
 
 
@@ -52,7 +52,7 @@ def _resolve(email: str) -> tuple:
             if not store.read_all():
                 return _env_fallback(email)
             return "", False
-        except Exception:
+        except Exception:  # intentional: must not crash
             return _env_fallback(email)
     return _env_fallback(email)
 

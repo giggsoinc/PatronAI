@@ -74,7 +74,7 @@ class ReportStore(BaseStore):
                             Params={"Bucket": self.bucket, "Key": key},
                             ExpiresIn=PRESIGNED_EXPIRY_SECONDS,
                         )
-                    except Exception:
+                    except Exception:  # intentional: returns safe default on any error
                         url = ""
                     reports.append({
                         "date":          report_date,

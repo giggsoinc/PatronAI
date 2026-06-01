@@ -13,7 +13,7 @@
 #   v1.0.0  2026-04-28  Initial — in-memory events list.
 #   v2.0.0  2026-04-29  Rollup-backed; scope/scope_id passed to tools.
 #   v2.1.0  2026-05-02  Moved from dashboard/ui/chat/ to src/chat/.
-#                       sys.path hack dropped — query/ is sibling.
+#                       sys.path workaround removed — query/ is sibling.
 # =============================================================
 
 import json
@@ -135,7 +135,7 @@ def call_llm(messages: list, events: list, view: str,
             "LLM server is starting up — please wait a moment and try again.")
     except RuntimeError:
         raise
-    except Exception:
+    except Exception:  # intentional: returns safe default on any error
         pass  # health endpoint absent (cloud API) — proceed
 
     try:

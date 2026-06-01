@@ -93,7 +93,7 @@ def _ingest_finding(s3, key: str, counters: Counter,
     try:
         body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
         payload = json.loads(body)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return
     if payload.get("outcome") != "UNKNOWN":
         return
@@ -113,7 +113,7 @@ def _load_dismissed() -> set:
         s3 = boto3.client("s3", region_name=REGION)
         body = s3.get_object(Bucket=BUCKET, Key=DISMISSED_KEY)["Body"].read().decode()
         return {ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")}
-    except Exception:
+    except Exception:  # intentional: must not crash
         return set()
 
 
@@ -134,7 +134,7 @@ def _promote_to_deny(domains: list, email: str) -> None:
     s3 = boto3.client("s3", region_name=REGION)
     try:
         existing = s3.get_object(Bucket=BUCKET, Key=DENY_CUSTOM_KEY)["Body"].read().decode()
-    except Exception:
+    except Exception:  # intentional: must not crash
         existing = "name,category,domain,port,severity,notes\n"
     if not existing.endswith("\n"):
         existing += "\n"

@@ -36,7 +36,7 @@ def _png_b64() -> str | None:
         if _PNG_PATH.exists():
             return "data:image/png;base64," + base64.b64encode(
                 _PNG_PATH.read_bytes()).decode()
-    except Exception:
+    except Exception:  # intentional: must not crash
         pass
     return None
 

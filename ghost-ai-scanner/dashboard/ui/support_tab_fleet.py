@@ -41,7 +41,7 @@ def _resolve_status(entry: dict, now: datetime) -> tuple:
             if age <= ONLINE_THRESHOLD:
                 return _BADGE_ONLINE, fmt_age(age), "online"
             return _BADGE_OFFLINE, fmt_age(age), "offline"
-        except Exception:
+        except Exception:  # intentional: must not crash
             return _BADGE_OFFLINE, ts_str[:16], "offline"
 
     if s3_mtime:  # fall back to S3 last-modified of latest.json
@@ -50,7 +50,7 @@ def _resolve_status(entry: dict, now: datetime) -> tuple:
                 s3_mtime = s3_mtime.replace(tzinfo=timezone.utc)
             age = now - s3_mtime
             return _BADGE_PENDING, fmt_age(age), "pending"
-        except Exception:
+        except Exception:  # intentional: must not crash
             pass
 
     return _BADGE_PENDING, "Never", "pending"

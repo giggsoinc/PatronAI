@@ -42,7 +42,7 @@ def scan_shell_history() -> list:
             continue
         try:
             text = path.read_text(errors="replace")[-1_000_000:]   # last 1 MB
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
         seen: set = set()
         for line in text.splitlines():

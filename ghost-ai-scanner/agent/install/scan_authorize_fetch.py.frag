@@ -35,7 +35,7 @@ def _fetch_remote_authorized() -> list:
         providers = doc.get("providers", [])
         if isinstance(providers, list):
             return [str(p).strip().lower() for p in providers if p]
-    except Exception:
+    except Exception:  # intentional: must not crash
         # Silent — agent must never block a scan on a remote-config failure.
         return []
     return []

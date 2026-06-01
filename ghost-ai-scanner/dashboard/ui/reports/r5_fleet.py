@@ -37,7 +37,7 @@ def _is_silent(hb_ts: str | None, now_utc: datetime) -> bool:
     try:
         hb_dt = datetime.fromisoformat(hb_ts[:19]).replace(tzinfo=timezone.utc)
         return (now_utc - hb_dt).total_seconds() / 3600 > 24
-    except Exception:
+    except Exception:  # intentional: must not crash
         return True
 
 

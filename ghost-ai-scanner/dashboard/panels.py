@@ -42,7 +42,7 @@ def health(store) -> None:
             mins_ago = int((now - dt).total_seconds() / 60)
             lag      = f"{mins_ago} min ago"
             status   = "🟢 Running" if mins_ago < 15 else "🔴 Lagging"
-        except Exception:
+        except Exception:  # intentional: must not crash
             lag, status = last_scan[:16], "🟡 Unknown"
     else:
         lag, status = "Never", "🔴 Not started"
@@ -106,7 +106,7 @@ def csv_editor() -> None:
             raw = s3.get_object(
                 Bucket=BUCKET, Key="config/authorized.csv"
             )["Body"].read().decode()
-        except Exception:
+        except Exception:  # intentional: must not crash
             raw = "name,domain_pattern,notes\n"
 
         edited = st.text_area("Allow list", value=raw, height=200)
@@ -125,7 +125,7 @@ def sidebar(email: str, is_admin: bool) -> None:
     with st.sidebar:
         try:
             st.image("assets/branding/patronai-logo.png", width=200)
-        except Exception:
+        except Exception:  # intentional: must not crash
             st.title("PatronAI")
         st.caption(f"Signed in as: **{email}**")
         st.caption(f"Role: {'Admin' if is_admin else 'Viewer'}")

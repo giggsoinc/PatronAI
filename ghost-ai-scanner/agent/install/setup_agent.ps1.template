@@ -7,10 +7,11 @@
 # USAGE: powershell -ExecutionPolicy Bypass -File setup_agent.ps1
 # REQUIRES: PowerShell 5.1+, Python 3 (with bcrypt installed)
 # =============================================================
-$ErrorActionPreference = "Stop"
-
 # Bug #7 fix: accept OTP as parameter for non-interactive (EXE) installs
+# param() MUST be the first executable statement — before $ErrorActionPreference.
 param([string]$Otp)
+
+$ErrorActionPreference = "Stop"
 
 $MetaUrl           = "{{META_URL}}"
 $StatusPutUrl      = "{{STATUS_PUT_URL}}"
@@ -85,6 +86,8 @@ try {
     Write-Fail "Cannot reach installation server. URL may have expired."
 }
 
+try {
+
 $OtpHash = & $PyExe -c "import json; print(json.load(open(r'$TmpMeta'))['otp_hash'])"
 $Expires  = & $PyExe -c "import json; print(json.load(open(r'$TmpMeta'))['expires_at'])"
 
@@ -146,7 +149,7 @@ New-Item -ItemType File -Force -Path (Join-Path $AgentDir "first_run.flag") | Ou
 
 # ── Write pre-commit hook script ──────────────────────────────
 $HookScript = Join-Path $AgentDir "pre_commit_hook.ps1"
-@'
+$_HookContent = @'
 # PatronAI pre-commit hook — PowerShell
 $ConfigPath = Join-Path $env:USERPROFILE ".patronai\config.json"
 if (-not (Test-Path $ConfigPath)) { exit 0 }
@@ -168,13 +171,14 @@ $Payload   = @{event_type="GIT_DIFF_SIGNAL";source="patronai_git_hook_ps";
 $Key = "ocsf/agent/git-diffs/$DeviceId-$Timestamp.json"
 aws s3 cp - "s3://$Bucket/$Key" --region $Region --content-type "application/json" --quiet 2>$null
 exit 0
-'@ | Set-Content -Path $HookScript -Encoding UTF8
+'@
+Write-Utf8NoBom $HookScript $_HookContent
 
 # Install hook into git repos found under user profile
 # -Force is required because .git directories have the Hidden attribute on Windows
 $InstallCount = 0
 $HookBody = "#!/bin/sh`npowershell -ExecutionPolicy Bypass -File `"$HookScript`""
-Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 4 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
+Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 6 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $HooksDir = Join-Path $_.FullName "hooks"
     if (-not (Test-Path $HooksDir)) { New-Item -ItemType Directory -Path $HooksDir | Out-Null }
     $HookPath = Join-Path $HooksDir "pre-commit"
@@ -210,11 +214,12 @@ if ($ExistingTpl -and $ExistingTpl -ne $TemplateDir) {
 # (avoids PowerShell expanding $HOME, $name etc. inside the Python source)
 $ScanScript = Join-Path $AgentDir "scan.ps1"
 $ScanPyFile = Join-Path $AgentDir "scan.py"
-@'
+$_ScanPyContent = @'
 {{INLINE_SCAN_PYTHON}}
-'@ | Set-Content -Path $ScanPyFile -Encoding UTF8
+'@
+Write-Utf8NoBom $ScanPyFile $_ScanPyContent
 
-@'
+$_ScanContent = @'
 $AgentDir    = Join-Path $env:USERPROFILE ".patronai"
 $ConfigPath  = Join-Path $AgentDir "config.json"
 $ScanUrlFile = Join-Path $AgentDir "scan_url.txt"
@@ -250,7 +255,8 @@ if ($Result) {
             -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing | Out-Null
     } catch { <# non-fatal #> }
 }
-'@ | Set-Content -Path $ScanScript -Encoding UTF8
+'@
+Write-Utf8NoBom $ScanScript $_ScanContent
 
 # ── Report install status ─────────────────────────────────────
 $StatusPayload = @{
@@ -267,7 +273,7 @@ try {
 
 # ── Write heartbeat script (URL refresh + identity + structured log) ──
 $HeartbeatScript = Join-Path $AgentDir "heartbeat.ps1"
-@'
+$_HbContent = @'
 $AgentDir    = Join-Path $env:USERPROFILE ".patronai"
 $ConfigPath  = Join-Path $AgentDir "config.json"
 $UrlFile     = Join-Path $AgentDir "heartbeat_url.txt"
@@ -333,7 +339,7 @@ $HookScript = Join-Path $AgentDir "pre_commit_hook.ps1"
 if (Test-Path $HookScript) {
     $Shim  = "#!/bin/sh`npowershell -ExecutionPolicy Bypass -File `"$HookScript`""
     $Added = 0
-    Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 4 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 6 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
         $HD = Join-Path $_.FullName "hooks"
         if (-not (Test-Path $HD)) { New-Item -ItemType Directory -Path $HD | Out-Null }
         $HP = Join-Path $HD "pre-commit"
@@ -348,7 +354,8 @@ if (Test-Path $HookScript) {
         "{`"ts`":`"$Ts`",`"type`":`"hook_backstop`",`"added`":$Added}" | Add-Content -Path $Log
     }
 }
-'@ | Set-Content -Path $HeartbeatScript -Encoding UTF8
+'@
+Write-Utf8NoBom $HeartbeatScript $_HbContent
 
 # ── Register Task Scheduler tasks ────────────────────────────
 function Register-PatronAITask($TaskName, $ScriptPath, $IntervalMinutes, $Desc) {
@@ -398,13 +405,16 @@ Register-PatronAITask "PatronAI-Scan"      $ScanScript      30 "PatronAI endpoin
 Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$HeartbeatScript`"" -WindowStyle Hidden
 Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScanScript`"" -WindowStyle Hidden
 
-Remove-Item -Path $TmpMeta -ErrorAction SilentlyContinue
+} finally {
+    Remove-Item -Path $TmpMeta -ErrorAction SilentlyContinue
+}
 
 # ── Drop the recipient-side diagnose script ──────────────────
 $Diag = Join-Path $AgentDir "diagnose.ps1"
-@'
+$_DiagContent = @'
 {{INLINE_DIAGNOSE_PS1}}
-'@ | Set-Content -Path $Diag -Encoding UTF8
+'@
+Write-Utf8NoBom $Diag $_DiagContent
 
 Write-Host ""
 Write-Info "Installation complete."

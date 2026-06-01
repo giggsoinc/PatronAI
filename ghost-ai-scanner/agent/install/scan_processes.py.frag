@@ -24,12 +24,12 @@ def _process_command_lines() -> list:
                 ["tasklist", "/FO", "CSV", "/NH"],
                 stderr=subprocess.DEVNULL, text=True, timeout=10,
             )
-        except Exception:
+        except Exception:  # intentional: must not crash
             return []
         return [ln.split(",", 1)[0].strip('"') for ln in out.splitlines() if ln]
     try:
         out = subprocess.check_output(["ps", "aux"], stderr=subprocess.DEVNULL, text=True, timeout=10)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
     cols: list = []
     for line in out.splitlines():

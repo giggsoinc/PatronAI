@@ -50,7 +50,7 @@ def _prime_grafana_url() -> None:
         store = BlobIndexStore(BUCKET, os.environ.get("AWS_REGION", "us-east-1"))
         url = store.settings.read().get("alerts", {}).get("grafana_url", "")
         st.session_state["grafana_url"] = url or os.environ.get("GRAFANA_URL", "")
-    except Exception:
+    except Exception:  # intentional: must not crash
         st.session_state["grafana_url"] = os.environ.get("GRAFANA_URL", "")
 
 

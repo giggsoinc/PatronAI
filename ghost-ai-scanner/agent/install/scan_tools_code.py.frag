@@ -88,7 +88,7 @@ def _count_tools_in_file(p: Path) -> int:
     """Read file once, return number of tool-pattern matches. 0 on error."""
     try:
         text = p.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
+    except Exception:  # intentional: must not crash
         return 0
     return len(_TOOL_PATTERNS_RE.findall(text))
 

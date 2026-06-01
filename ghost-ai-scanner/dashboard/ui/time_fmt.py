@@ -22,12 +22,12 @@ from typing import Optional
 
 try:
     from zoneinfo import ZoneInfo
-except Exception:                                            # pragma: no cover
+except Exception:  # intentional: must not crash                                           # pragma: no cover
     ZoneInfo = None                                          # type: ignore
 
 try:
     import streamlit as st
-except Exception:                                            # pragma: no cover
+except Exception:  # intentional: must not crash                                           # pragma: no cover
     st = None                                                # type: ignore
 
 
@@ -40,14 +40,14 @@ def _viewer_tz_name() -> str:
         tz = getattr(st.context, "timezone", None)
         if tz:
             return str(tz)
-    except Exception:
+    except Exception:  # intentional: must not crash
         pass
     # Fall back to a session-state override (set elsewhere in the app).
     try:
         tz = st.session_state.get("user_timezone")
         if tz:
             return str(tz)
-    except Exception:
+    except Exception:  # intentional: must not crash
         pass
     return "UTC"
 
@@ -86,7 +86,7 @@ def _parse_iso(s) -> Optional[datetime]:
         text = str(s).strip().replace("Z", "+00:00")
         dt = datetime.fromisoformat(text)
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return None
 
 
@@ -105,7 +105,7 @@ def fmt(iso, tz_name: Optional[str] = None) -> str:
     if ZoneInfo is not None and name != "UTC":
         try:
             dt = dt.astimezone(ZoneInfo(name))
-        except Exception:
+        except Exception:  # intentional: must not crash
             name = "UTC"
             dt = dt.astimezone(timezone.utc)
     else:

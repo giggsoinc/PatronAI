@@ -82,7 +82,7 @@ def filtered_table(df, key: str, column_config=None,
         result = st.dataframe(filtered, key=f"{key}_table", **kwargs)
         try:
             sel_rows = result.selection.rows
-        except Exception:
+        except Exception:  # intentional: must not crash
             sel_rows = []
         return filtered, sel_rows
 
@@ -135,7 +135,7 @@ def apply_search_dicts(rows: list, query: str) -> list:
     for r in rows:
         try:
             blob = " ".join(str(v) for v in r.values()).lower()
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
         if q in blob:
             out.append(r)

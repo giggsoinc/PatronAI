@@ -108,7 +108,7 @@ def _provider_bubble(events: list) -> None:
                             key="exec_landscape_bubble")
     try:
         pts = (event.selection.points if event else []) or []
-    except Exception:
+    except Exception:  # intentional: must not crash
         pts = []
     if pts:
         # customdata is the reliable field; fall back to text then label

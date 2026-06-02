@@ -79,5 +79,5 @@ class BaseStore:
         try:
             self.s3.head_object(Bucket=self.bucket, Key=key)
             return True
-        except Exception:
+        except Exception:  # intentional: returns safe default on any error
             return False

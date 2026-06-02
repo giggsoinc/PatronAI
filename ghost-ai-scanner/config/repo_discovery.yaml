@@ -1,60 +1,344 @@
 # =============================================================
 # FILE: config/repo_discovery.yaml
-# PROJECT: PatronAI — Phase 1A
-# VERSION: 1.0.0
-# UPDATED: 2026-04-26
+# PROJECT: PatronAI
+# VERSION: 2.0.0
+# UPDATED: 2026-05-22
 # OWNER: Giggso Inc (Ravi Venugopal)
-# PURPOSE: Knobs for the agent's repo-discovery walk. Edited at the
-#          server side; the agent reads its baked-in defaults today
-#          (see scan_repo_discovery.py.frag) and will be wired to read
-#          this YAML in a future enhancement.
-# AUDIT LOG:
-#   v1.0.0  2026-04-26  Initial. Phase 1A.
+# PURPOSE: Multi-OS repo-discovery policy. Replaces v1.0.0
+#          ($HOME-only walk). Drives the agent walker on Windows,
+#          macOS, and Linux from one canonical source.
+#
+# ALGORITHM (applied in order, top to bottom):
+#   1. Build the candidate-roots set: $HOME / $USERPROFILE plus
+#      `extra_roots` for the detected OS, filtered to roots that
+#      actually exist on disk.
+#   2. For each root, depth-first walk up to `max_depth` and
+#      `max_seconds` (whichever hits first).
+#   3. Absolute-path exclude — if the *full* path of the current
+#      directory matches anything in `exclude_absolute_paths_<os>`,
+#      skip the whole subtree.
+#   4. Name exclude (any depth) — if the directory's *basename*
+#      matches `exclude_names_universal`, skip subtree.
+#   5. Hidden directory rule — if `basename` starts with "." AND
+#      isn't in `exclude_hidden_names_always`:
+#        a. Peek for `.git/` directly inside.
+#        b. If found -> treat as a discovered repo.
+#        c. If not -> skip subtree.
+#   6. Repo boundary — if the current directory itself contains
+#      `.git/`, treat as a repo root and do not recurse further.
+#
+# A/B TEST NOTE: v1.0.0 (HOME-only) is preserved at the bottom
+# of this file as a commented block. To revert to v1, uncomment
+# that section and comment out everything above it.
 # =============================================================
 
-# Skip these names anywhere they appear in the path. Walks bail at
-# repo boundaries (a dir containing `.git/` is treated as a repo
-# root and never recursed into).
-exclude_names:
-  # Vendored / build / cache dirs
+version: 2.0.0
+
+extra_roots:
+  windows:
+    drive_relative:
+      - Code
+      - Codebase
+      - Repo
+      - Repos
+      - Repositories
+      - Workspace
+      - Workspaces
+      - Projects
+      - Project
+      - Dev
+      - Development
+      - Source
+      - Sources
+      - src
+      - Git
+      - GitHub
+      - work
+      - Work
+    absolute:
+      - C:\dev
+      - C:\src
+      - D:\dev
+      - D:\src
+      - E:\dev
+      - E:\src
+
+  macos:
+    home_relative:
+      - Code
+      - Codebase
+      - Repos
+      - Repositories
+      - Workspace
+      - Projects
+      - Dev
+      - Development
+      - src
+      - work
+      - GitHub
+      - Documents/Code
+      - Documents/Repos
+      - Documents/GitHub
+    absolute:
+      - /Users/Shared/Code
+      - /Users/Shared/Repos
+    skip_volumes:
+      - "Macintosh HD"
+      - "Recovery"
+      - "Preboot"
+      - "VM"
+      - "Update"
+      - "xarts"
+      - "iSCPreboot"
+
+  linux:
+    home_relative:
+      - Code
+      - Codebase
+      - Repos
+      - Repositories
+      - Workspace
+      - Projects
+      - Dev
+      - Development
+      - src
+      - work
+      - GitHub
+    absolute:
+      - /opt/code
+      - /opt/workspace
+      - /opt/repos
+      - /srv/code
+      - /srv/workspace
+      - /data/code
+      - /data/repos
+      - /data/workspace
+      - /workspace
+      - /code
+    skip_mounts:
+      - lost+found
+      - cdrom
+      - dvd
+
+exclude_absolute_paths_windows:
+  - C:\Windows
+  - C:\Program Files
+  - C:\Program Files (x86)
+  - C:\ProgramData
+  - C:\$Recycle.Bin
+  - C:\System Volume Information
+  - C:\Recovery
+  - C:\PerfLogs
+  - C:\Boot
+  - C:\MSOCache
+  - C:\Config.Msi
+  - C:\Drivers
+  - C:\Dell
+  - C:\HP
+  - C:\Lenovo
+  - C:\Intel
+  - C:\NVIDIA
+  - C:\AMD
+  - C:\OEM
+  - C:\Users\Default
+  - C:\Users\Default User
+  - C:\Users\Public
+  - C:\Users\All Users
+  - "%USERPROFILE%\\AppData"
+
+exclude_absolute_paths_macos:
+  - /System
+  - /Library
+  - /Applications
+  - /usr
+  - /bin
+  - /sbin
+  - /etc
+  - /var
+  - /private
+  - /dev
+  - /cores
+  - /Network
+  - /Volumes/Recovery
+  - /Volumes/Preboot
+  - /Volumes/VM
+  - "$HOME/Library"
+  - "$HOME/Applications"
+  - "$HOME/Music"
+  - "$HOME/Pictures"
+  - "$HOME/Movies"
+  - "$HOME/Public"
+  - "$HOME/.config/gcloud"
+
+exclude_absolute_paths_linux:
+  - /proc
+  - /sys
+  - /dev
+  - /run
+  - /boot
+  - /usr
+  - /var
+  - /etc
+  - /lib
+  - /lib32
+  - /lib64
+  - /sbin
+  - /bin
+  - /lost+found
+  - /tmp
+  - /var/tmp
+  - /snap
+  - /flatpak
+  - /.snapshots
+  - "$HOME/.local/share/Trash"
+  - "$HOME/snap"
+  - "$HOME/.config/gcloud"
+
+exclude_names_universal:
+  # Vendored / package-manager caches
   - node_modules
-  - .venv
-  - venv
+  - bower_components
   - vendor
-  - __pycache__
-  - .tox
-  - .gradle
-  - .m2
-  - .cargo
-  - .cache
-  - .docker
   - .npm
   - .pnpm
   - .yarn
+  - .pnpm-store
+  - .nuget
+  - .gradle
+  - .m2
+  - .ivy2
+  - .sbt
+  - .cargo
   - .rustup
   - .pyenv
   - .rbenv
-  # System dirs (macOS)
-  - Library
-  - Applications
+  - .nvm
+  - .deno
+  - .bun
+  - .composer
+  # Python venvs / caches
+  - .venv
+  - venv
+  - env
+  - .virtualenv
+  - virtualenv
+  - __pycache__
+  - .mypy_cache
+  - .pytest_cache
+  - .ruff_cache
+  - .tox
+  # Build outputs
+  - .next
+  - .nuxt
+  - .svelte-kit
+  - .parcel-cache
+  - .vite
+  - .turbo
+  - .cache-loader
+  # Container / orchestration state
+  - .docker
+  - .podman
+  - .kube
+  - .minikube
+  - .helm
+  - .colima
+  - .terraform
+  - .terragrunt-cache
+  # IDE / editor state
+  - .idea
+  - .vs
+  - .vscode-server
+  - .history
+  - .ipynb_checkpoints
+  # AI-tool state
+  - .copilot
+  - .codeium
+  - .continue
+  - .cline
+  - .aider
+  - .cursor-server
+  # Coverage / test artefacts
+  - coverage
+  - htmlcov
+  - .coverage
+  - .nyc_output
+  # Misc OS noise
   - .Trash
-  - private
-  # Personal media trees — almost never contain code
-  - Pictures
-  - Music
-  - Movies
-  - Public
+  - .Trash-1000
+  - "$RECYCLE.BIN"
+  - "System Volume Information"
 
-# Hard limit — never recurse below this depth from $HOME.
+exclude_hidden_names_always:
+  - .ssh
+  - .gnupg
+  - .password-store
+  - .aws
+  - .azure
+  - .gcloud
+  - .kube
+  - .docker
+  - .pulumi
+  - .terraform.d
+  - .netrc
+  - .git-credentials
+
+# RESERVED — not yet wired into scan_repo_discovery.py.frag.
+# These hidden directories ARE git repos and should be discovered,
+# not excluded. Once the walker gains dotfile-repo support these will
+# be used to explicitly allow-list them through the hidden-directory rule.
+known_dotfile_repos:
+  - .dotfiles
+  - .dotfiles-private
+  - .config
+  - .emacs.d
+  - .vim
+  - .neovim
+  - .nvim
+  - .oh-my-zsh
+  - .zsh
+  - .bash_it
+  - .tmux
+
 max_depth: 6
+max_seconds: 90
 
-# Hard time cap — if the walk hasn't completed by this many seconds,
-# bail and ship whatever was found. Prevents a runaway walk on
-# pathological filesystems.
-max_seconds: 60
+# RESERVED — not yet consumed by the heartbeat daemon.
+# When implemented, the agent will run a full multi-root walk every N
+# heartbeat cycles instead of only scanning incremental changes.
+backstop_full_walk_every_n_heartbeats: 12
 
-# Known repo-discovery roots — informational only today (the walker
-# starts from $HOME). Listed here so OSS contributors with non-standard
-# layouts know what gets scanned by default.
-documented_default_roots:
-  - "$HOME"
+# =============================================================
+# v1.0.0 (A/B TEST — original HOME-only walker)
+# Uncomment below and comment out everything above to revert.
+# =============================================================
+# version: 1.0.0
+# exclude_names:
+#   - node_modules
+#   - .venv
+#   - venv
+#   - vendor
+#   - __pycache__
+#   - .tox
+#   - .gradle
+#   - .m2
+#   - .cargo
+#   - .cache
+#   - .docker
+#   - .npm
+#   - .pnpm
+#   - .yarn
+#   - .rustup
+#   - .pyenv
+#   - .rbenv
+#   - Library
+#   - Applications
+#   - .Trash
+#   - private
+#   - Pictures
+#   - Music
+#   - Movies
+#   - Public
+# max_depth: 6
+# max_seconds: 60
+# documented_default_roots:
+#   - "$HOME"

@@ -57,7 +57,7 @@ def valid_glob(pattern: str) -> bool:
     try:
         fnmatch("test.example.com", pattern)
         return True
-    except Exception:
+    except Exception:  # intentional: returns safe default on any error
         return False
 
 

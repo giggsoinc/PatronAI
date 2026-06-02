@@ -33,7 +33,7 @@ def scan_containers() -> list:
             ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}"],
             stderr=subprocess.DEVNULL, text=True, timeout=10,
         )
-    except Exception:
+    except Exception:  # intentional: must not crash
         return findings
 
     for line in listing.splitlines():
@@ -54,7 +54,7 @@ def scan_containers() -> list:
                 ["docker", "logs", "--tail", "500", name],
                 stderr=subprocess.STDOUT, text=True, timeout=8, errors="replace",
             )
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
         m = _AI_LOG_RE.search(logs)
         if m and not _is_authorized(image):

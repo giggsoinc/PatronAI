@@ -11,7 +11,6 @@
 #          Parallel S3 GETs, gzip-decoded, in-memory LRU.
 # DEPENDS: boto3
 # =============================================================
-
 from __future__ import annotations
 
 import gzip
@@ -26,6 +25,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import boto3
+
+from ._rollup_merge import (  # noqa: E402
+    _merge_provider, _merge_user, _merge_severity, _merge_simple, _finalise,
+)
 
 log = logging.getLogger("marauder-scan.query.rollup_reader")
 
@@ -115,114 +118,6 @@ def _fetch_one(s3, key: str) -> dict:
 
 
 # ── Merge logic per dimension ───────────────────────────────────
-
-
-def _merge_provider(merged: dict, src: dict) -> None:
-    """Merge two by_provider dicts. `users` is a sorted list of email strings;
-    set-union for distinct counts."""
-    for prov, entry in src.items():
-        if prov not in merged:
-            # Copy with users as a set internally for dedup.
-            merged[prov] = {
-                "hits": int(entry.get("hits", 0)),
-                "_users": set(entry.get("users", []) or []),
-                "device_count": int(entry.get("device_count", 0)),
-                "categories": dict(entry.get("categories", {}) or {}),
-                "by_severity": dict(entry.get("by_severity", {}) or {}),
-                "first_seen": entry.get("first_seen", "") or "",
-                "last_seen":  entry.get("last_seen",  "") or "",
-            }
-        else:
-            m = merged[prov]
-            m["hits"] += int(entry.get("hits", 0))
-            m["_users"].update(entry.get("users", []) or [])
-            m["device_count"] += int(entry.get("device_count", 0))
-            for k, v in (entry.get("categories", {}) or {}).items():
-                m["categories"][k] = m["categories"].get(k, 0) + int(v)
-            for k, v in (entry.get("by_severity", {}) or {}).items():
-                m["by_severity"][k] = m["by_severity"].get(k, 0) + int(v)
-            fs = entry.get("first_seen", "")
-            ls = entry.get("last_seen",  "")
-            if fs and (not m["first_seen"] or fs < m["first_seen"]):
-                m["first_seen"] = fs
-            if ls and ls > m["last_seen"]:
-                m["last_seen"] = ls
-
-
-def _merge_user(merged: dict, src: dict) -> None:
-    for u, entry in src.items():
-        if u not in merged:
-            merged[u] = {
-                "hits": int(entry.get("hits", 0)),
-                "_providers": set(entry.get("providers", []) or []),
-                "device_count": int(entry.get("device_count", 0)),
-                "categories": dict(entry.get("categories", {}) or {}),
-                "by_severity": dict(entry.get("by_severity", {}) or {}),
-                "total_risk": float(entry.get("total_risk", 0.0)),
-                "first_seen": entry.get("first_seen", "") or "",
-                "last_seen":  entry.get("last_seen",  "") or "",
-            }
-        else:
-            m = merged[u]
-            m["hits"] += int(entry.get("hits", 0))
-            m["_providers"].update(entry.get("providers", []) or [])
-            m["device_count"] += int(entry.get("device_count", 0))
-            for k, v in (entry.get("categories", {}) or {}).items():
-                m["categories"][k] = m["categories"].get(k, 0) + int(v)
-            for k, v in (entry.get("by_severity", {}) or {}).items():
-                m["by_severity"][k] = m["by_severity"].get(k, 0) + int(v)
-            m["total_risk"] += float(entry.get("total_risk", 0.0))
-            fs = entry.get("first_seen", "")
-            ls = entry.get("last_seen",  "")
-            if fs and (not m["first_seen"] or fs < m["first_seen"]):
-                m["first_seen"] = fs
-            if ls and ls > m["last_seen"]:
-                m["last_seen"] = ls
-
-
-def _merge_severity(merged: dict, src: dict) -> None:
-    for k, v in src.items():
-        merged[k] = merged.get(k, 0) + int(v)
-
-
-def _merge_simple(merged: dict, src: dict) -> None:
-    """device / category dimension merge."""
-    for k, entry in src.items():
-        if k not in merged:
-            merged[k] = {
-                "hits": int(entry.get("hits", 0)),
-                "user_count": int(entry.get("user_count", 0)),
-                "device_count": int(entry.get("device_count", 0)),
-                "by_severity": dict(entry.get("by_severity", {}) or {}),
-            }
-        else:
-            m = merged[k]
-            m["hits"] += int(entry.get("hits", 0))
-            m["user_count"] += int(entry.get("user_count", 0))
-            m["device_count"] += int(entry.get("device_count", 0))
-            for kk, vv in (entry.get("by_severity", {}) or {}).items():
-                m["by_severity"][kk] = m["by_severity"].get(kk, 0) + int(vv)
-
-
-def _finalise(dim: str, merged: dict) -> dict:
-    """Convert internal sets back to counts/sorted lists for JSON output."""
-    if dim == "provider":
-        out = {}
-        for prov, m in merged.items():
-            users = sorted(m.pop("_users"))
-            m["users"] = users
-            m["user_count"] = len(users)
-            out[prov] = m
-        return out
-    if dim == "user":
-        out = {}
-        for u, m in merged.items():
-            provs = sorted(m.pop("_providers"))
-            m["providers"] = provs
-            m["provider_count"] = len(provs)
-            out[u] = m
-        return out
-    return merged
 
 
 # ── Public API ──────────────────────────────────────────────────

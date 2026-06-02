@@ -38,6 +38,7 @@ class Ingestor:
         # store: BlobIndexStore — all persistence goes through here
         self._store    = store
         self._settings = settings
+        self._empty_unauthorized_cycles = 0   # metric: consecutive cycles with no list
 
         # S3 config
         s3_cfg         = settings.get("storage", {})
@@ -63,10 +64,14 @@ class Ingestor:
         unauthorized = load_unauthorized(self._bucket)
 
         if not unauthorized:
-            log.error("Unauthorized list empty — scan aborted")
-            return {"outcome": "aborted", "reason": "empty unauthorized list"}
+            self._empty_unauthorized_cycles += 1
+            log.error("Unauthorized list empty — matching disabled (consecutive=%d). Check S3 CSV.", self._empty_unauthorized_cycles)
+        else:
+            self._empty_unauthorized_cycles = 0
 
-        # Build pipeline with fresh lists
+        # Build pipeline with fresh lists (pipeline handles empty unauthorized gracefully:
+        # ENDPOINT_SCAN events are pre-classified and bypass the matcher entirely,
+        # so endpoint inventory continues even when the unauthorized list is missing)
         pipeline = Pipeline(
             store=self._store,
             authorized=authorized,
@@ -138,12 +143,8 @@ class Ingestor:
             "unknown":          outcomes.get("UNKNOWN", 0),
         }
 
-
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
-    """Best-effort parse an ISO-8601 timestamp; return None on miss."""
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s)
-    except Exception:
-        return None
+    """Best-effort ISO-8601 parse; returns None on miss or bad input."""
+    if not s: return None
+    try: return datetime.fromisoformat(s)
+    except Exception: return None  # intentional: returns safe default on any error

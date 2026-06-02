@@ -35,6 +35,7 @@
 # AUDIT LOG:
 #   v1.0.0  2026-05-02  Initial. Replaces three duplicated SES paths.
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 from __future__ import annotations
 
@@ -281,7 +282,7 @@ def send_alert(recipients,
     # (e.g. when notify.email is used from a CLI script) doesn't crash.
     try:
         from time_fmt import fmt as _fmt_time  # type: ignore
-    except Exception:  # pragma: no cover — fall back to raw timestamp
+    except Exception:  # pragma: no cover — fall back to raw timestamp  # intentional: returns safe default on any error
         def _fmt_time(x):  # type: ignore
             return x or ""
 

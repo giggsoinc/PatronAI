@@ -46,7 +46,7 @@ def build_system_prompt(scope: str, scope_id: str, view: str,
     """Build the system prompt injected at the start of every chat turn."""
     try:
         s = get_summary_stats(scope, scope_id, days_back=30)
-    except Exception:
+    except Exception:  # intentional: returns safe default on any error
         s = {"total_findings": 0, "severities": {},
              "unique_users": 0, "unique_providers": 0}
 

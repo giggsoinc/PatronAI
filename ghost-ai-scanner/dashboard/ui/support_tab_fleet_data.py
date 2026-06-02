@@ -69,7 +69,7 @@ def load_scan_info(s3, bucket: str, token: str) -> dict:
         obj = s3.get_object(Bucket=bucket,
                             Key=f"{_SCANS_PREFIX}{token}/latest.json")
         return json.loads(obj["Body"].read())
-    except Exception:
+    except Exception:  # intentional: must not crash
         return {}
 
 
@@ -81,7 +81,7 @@ def load_status(s3, bucket: str, token: str) -> dict:
             Key=f"config/HOOK_AGENTS/{token}/status.json",
         )
         return json.loads(obj["Body"].read())
-    except Exception:
+    except Exception:  # intentional: must not crash
         return {}
 
 

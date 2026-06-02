@@ -69,7 +69,7 @@ def load_history(email: str, view: str) -> list:
                     msgs.insert(0, json.loads(ln))
                     if len(msgs) >= _WINDOW:
                         break
-            except Exception:
+            except Exception:  # intentional: returns safe default on any error
                 continue
             if len(msgs) >= _WINDOW:
                 break

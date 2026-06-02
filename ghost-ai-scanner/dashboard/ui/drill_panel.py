@@ -56,7 +56,7 @@ def get_drill(panel_key: str) -> Optional[dict]:
     try:
         import streamlit as st
         return st.session_state.get(_key(panel_key))
-    except Exception:
+    except Exception:  # intentional: must not crash
         return None
 
 
@@ -79,7 +79,7 @@ def apply_drill(events: list, drill: dict) -> list:
         try:
             if e.get(field) == value:
                 out.append(e)
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
     return out
 

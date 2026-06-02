@@ -26,18 +26,39 @@ _die()  { echo "ERROR: $*" >&2; exit 1; }
 _info() { echo "[patronai] $*"; }
 
 # ── Dependencies ──────────────────────────────────────────────
-command -v curl    >/dev/null 2>&1 || _die "curl is required."
-command -v python3 >/dev/null 2>&1 || _die "python3 is required."
-python3 -c "import bcrypt" 2>/dev/null || {
-  _info "Installing bcrypt..."
-  pip3 install --quiet "bcrypt>=4.0.0" || _die "Cannot install bcrypt."
+command -v curl >/dev/null 2>&1 || _die "curl is required."
+
+# Detect a real Python 3, not Apple's CLT stub which triggers a modal dialog.
+_is_apple_stub() {
+  local out
+  out=$(/usr/bin/python3 -c 'print(1)' 2>&1 1>/dev/null) || true
+  [[ "$out" == *"command line developer tools"* ]]
 }
+PY=""
+for cand in python3.12 python3.11 python3.10 python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    real=$(command -v "$cand")
+    if [[ "$real" == "/usr/bin/python3" ]] && _is_apple_stub; then continue; fi
+    PY="$real"
+    break
+  fi
+done
+[ -z "$PY" ] && _die "Python 3 is required. Install via: brew install python  OR  https://www.python.org/downloads/"
+_info "Using Python at: $PY"
+
+# bcrypt — install into user site so PEP 668 doesn't reject it.
+if ! "$PY" -c "import bcrypt" 2>/dev/null; then
+  _info "Installing bcrypt..."
+  "$PY" -m pip install --user "bcrypt>=4.0.0" 2>/dev/null \
+    || "$PY" -m pip install --user --break-system-packages "bcrypt>=4.0.0" 2>/dev/null \
+    || _die "Cannot install bcrypt. Run: $PY -m pip install bcrypt"
+fi
 
 # ── OTP prompt ────────────────────────────────────────────────
 echo ""
 echo "PatronAI — {{COMPANY}} · {{RECIPIENT_NAME}}"
 echo "-------------------------------------------"
-read -rp "Enter your 6-digit OTP from the email: " OTP_INPUT
+read -rsp "Enter your 6-digit OTP from the email: " OTP_INPUT; echo
 [[ "$OTP_INPUT" =~ ^[0-9]{6}$ ]] || _die "OTP must be exactly 6 digits."
 
 # ── Validate OTP against S3 meta ─────────────────────────────
@@ -46,13 +67,13 @@ TMP=$(mktemp /tmp/patronai.XXXXXX.json)
 trap 'rm -f "$TMP"' EXIT
 curl -fsSL --max-time 30 "$META_URL" -o "$TMP" \
   || _die "Cannot reach server. Link may have expired — request a new package."
-OTP_HASH=$(python3 -c "import json; print(json.load(open('$TMP'))['otp_hash'])")
-EXPIRES=$(python3  -c "import json; print(json.load(open('$TMP'))['expires_at'])")
-python3 -c "
+OTP_HASH=$("$PY" -c "import json; print(json.load(open('$TMP'))['otp_hash'])")
+EXPIRES=$("$PY"  -c "import json; print(json.load(open('$TMP'))['expires_at'])")
+"$PY" -c "
 from datetime import datetime,timezone
 exit(1 if datetime.now(timezone.utc)>datetime.fromisoformat('$EXPIRES') else 0)
 " || _die "Package expired. Request a new one from your administrator."
-python3 -c "
+"$PY" -c "
 import bcrypt
 exit(0 if bcrypt.checkpw(b'$OTP_INPUT',b'$OTP_HASH') else 1)
 " || _die "Invalid OTP."
@@ -60,19 +81,31 @@ _info "OTP validated."
 
 # ── Write agent config (identity baked at install time) ──────
 mkdir -p "$AGENT_DIR"
-DEVICE_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-MAC_PRIMARY=$(python3 -c "import uuid; n=uuid.getnode(); print(':'.join(f'{(n>>i)&0xff:02x}' for i in (40,32,24,16,8,0)))")
-python3 - <<PYCFG > "$AGENT_DIR/config.json"
-import json
+DEVICE_UUID=$("$PY" -c "import uuid; print(uuid.uuid4())")
+# Reliable MAC: use system tools, fall back to uuid.getnode()
+if [ "$(uname -s)" = "Darwin" ]; then
+  MAC_PRIMARY=$(networksetup -listallhardwareports 2>/dev/null | awk '/Ethernet Address/ {print tolower($3); exit}')
+  [ -z "$MAC_PRIMARY" ] && MAC_PRIMARY=$(ifconfig en0 2>/dev/null | awk '/ether/{print $2; exit}')
+else
+  MAC_PRIMARY=$(ip link show 2>/dev/null | awk '/link\/ether/{print $2; exit}')
+fi
+[ -z "$MAC_PRIMARY" ] && MAC_PRIMARY=$("$PY" -c "import uuid; n=uuid.getnode(); print(':'.join(f'{(n>>i)&0xff:02x}' for i in (40,32,24,16,8,0)))")
+
+# Write config.json via env vars (quoted heredoc prevents shell injection)
+export PA_BUCKET="$BUCKET" PA_REGION="$REGION" PA_COMPANY="$COMPANY" \
+       PA_TOKEN="$TOKEN" PA_EMAIL="$RECIPIENT_EMAIL" \
+       PA_DEVICE_UUID="$DEVICE_UUID" PA_MAC="$MAC_PRIMARY" PA_DIR="$AGENT_DIR"
+"$PY" - <<'PYCFG' > "$AGENT_DIR/config.json"
+import json, os
 print(json.dumps({
-  "bucket":      "$BUCKET",
-  "region":      "$REGION",
-  "company":     "$COMPANY",
-  "token":       "$TOKEN",
-  "email":       "$RECIPIENT_EMAIL",
-  "device_uuid": "$DEVICE_UUID",
-  "mac_primary": "$MAC_PRIMARY",
-  "agent_dir":   "$AGENT_DIR",
+  "bucket":      os.environ["PA_BUCKET"],
+  "region":      os.environ["PA_REGION"],
+  "company":     os.environ["PA_COMPANY"],
+  "token":       os.environ["PA_TOKEN"],
+  "email":       os.environ["PA_EMAIL"],
+  "device_uuid": os.environ["PA_DEVICE_UUID"],
+  "mac_primary": os.environ["PA_MAC"],
+  "agent_dir":   os.environ["PA_DIR"],
 }))
 PYCFG
 chmod 600 "$AGENT_DIR/config.json"
@@ -105,9 +138,19 @@ cat > "$HOOK_SCRIPT" << 'HOOK_EOF'
 AGENT_DIR="$HOME/.patronai"
 CONFIG="$AGENT_DIR/config.json"
 [ -f "$CONFIG" ] || exit 0
-BUCKET=$(python3 -c "import json; print(json.load(open('$CONFIG'))['bucket'])" 2>/dev/null)
-REGION=$(python3 -c "import json; print(json.load(open('$CONFIG'))['region'])" 2>/dev/null)
-COMPANY=$(python3 -c "import json; print(json.load(open('$CONFIG'))['company'])" 2>/dev/null)
+# Read config fields via shlex.quote — eval on pre-quoted output is safe
+# (shlex.quote wraps each value in single quotes with internal ' escaped).
+_cfg_env=$(PATRONAI_CONFIG="$CONFIG" python3 - <<'PYCFG' 2>/dev/null
+import json, os, shlex
+try:
+    c = json.load(open(os.environ["PATRONAI_CONFIG"]))
+    for k in ("bucket", "region", "company"):
+        print(f"{k.upper()}={shlex.quote(str(c.get(k, '')))}")
+except Exception:
+    import sys; sys.exit(1)
+PYCFG
+) || exit 0
+eval "$_cfg_env"
 [ -z "$BUCKET" ] && exit 0
 AI_SIGNALS="langchain|langgraph|llama_index|haystack|autogen|crewai|openai|anthropic|pydantic_ai|smolagents|MCPServer|sk-proj-|sk-ant-|hf_[a-zA-Z0-9]"
 DIFF=$(git diff --cached --unified=3 2>/dev/null || echo "")
@@ -145,16 +188,22 @@ echo "[patronai] Hook installed in \$REPO"
 HELPER_EOF
 chmod +x "$INSTALL_HELPER"
 
-# ── Auto-install into git repos found under HOME ──────────────
+# ── Auto-install into git repos found under HOME + /Volumes ──────
 INSTALL_COUNT=0
-while IFS= read -r -d '' GIT_DIR; do
-  HOOKS_DIR="$GIT_DIR/hooks"
-  mkdir -p "$HOOKS_DIR"
-  HOOK_PATH="$HOOKS_DIR/pre-commit"
-  [ -f "$HOOK_PATH" ] && [ ! -L "$HOOK_PATH" ] && cp "$HOOK_PATH" "${HOOK_PATH}.backup"
-  ln -sf "$HOOK_SCRIPT" "$HOOK_PATH"
-  INSTALL_COUNT=$((INSTALL_COUNT + 1))
-done < <(find "$HOME" -maxdepth 6 -name ".git" -type d -print0 2>/dev/null)
+INSTALL_ROOTS=("$HOME")
+if [ "$(uname -s)" = "Darwin" ]; then
+  for v in /Volumes/*/; do [ -d "$v" ] && INSTALL_ROOTS+=("$v"); done
+fi
+for ROOT in "${INSTALL_ROOTS[@]}"; do
+  while IFS= read -r -d '' GIT_DIR; do
+    HOOKS_DIR="$GIT_DIR/hooks"
+    mkdir -p "$HOOKS_DIR"
+    HOOK_PATH="$HOOKS_DIR/pre-commit"
+    [ -f "$HOOK_PATH" ] && [ ! -L "$HOOK_PATH" ] && cp "$HOOK_PATH" "${HOOK_PATH}.backup"
+    ln -sf "$HOOK_SCRIPT" "$HOOK_PATH"
+    INSTALL_COUNT=$((INSTALL_COUNT + 1))
+  done < <(find "$ROOT" -maxdepth 6 -name ".git" -type d -print0 2>/dev/null)
+done
 
 # ── Step 0.1 — git template dir (auto-install on every future init/clone) ──
 # Honours an existing init.templateDir if the user already set one (additive).
@@ -236,9 +285,9 @@ REFRESH_URL=$(cat "$AGENT_DIR/urls_refresh_url" 2>/dev/null || echo "")
 if [ -n "$REFRESH_URL" ]; then
   BUNDLE=$(curl -fsSL --max-time 10 "$REFRESH_URL" 2>/dev/null || echo "")
   if [ -n "$BUNDLE" ]; then
-    python3 - <<PYREFRESH 2>/dev/null
+    BUNDLE_JSON="$BUNDLE" python3 - <<'PYREFRESH' 2>/dev/null
 import json, os
-b = json.loads("""$BUNDLE""")
+b = json.loads(os.environ["BUNDLE_JSON"])
 for k, fname in (("heartbeat_put_url","heartbeat_url"),
                  ("scan_put_url","scan_url"),
                  ("authorized_get_url","authorized_url")):
@@ -284,21 +333,25 @@ TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "{\"ts\":\"$TS\",\"type\":\"heartbeat\",\"http_status\":$HTTP}" >> "$LOG"
 
 # 4. Hook coverage backstop (Step 0.1) — every 5 min, ensure every git
-# repo under $HOME (depth 6) has our pre-commit hook. Catches repos
-# cloned before the agent was installed and any rare miss by the
-# init.templateDir path. Cheap (<1s on typical home).
+# repo under $HOME + /Volumes (depth 6) has our pre-commit hook.
 HOOK_SCRIPT="$AGENT_DIR/pre_commit_hook.sh"
 [ -f "$HOOK_SCRIPT" ] || exit 0
 ADDED=0
-while IFS= read -r -d '' GIT_DIR; do
-    HP="$GIT_DIR/hooks/pre-commit"
-    if [ ! -L "$HP" ] || [ "$(readlink "$HP" 2>/dev/null)" != "$HOOK_SCRIPT" ]; then
-        mkdir -p "$GIT_DIR/hooks"
-        [ -f "$HP" ] && [ ! -L "$HP" ] && cp "$HP" "${HP}.backup"
-        ln -sf "$HOOK_SCRIPT" "$HP"
-        ADDED=$((ADDED + 1))
-    fi
-done < <(find "$HOME" -maxdepth 6 -name ".git" -type d -print0 2>/dev/null)
+ROOTS=("$HOME")
+if [ "$(uname -s)" = "Darwin" ]; then
+  for v in /Volumes/*/; do [ -d "$v" ] && ROOTS+=("$v"); done
+fi
+for ROOT in "${ROOTS[@]}"; do
+  while IFS= read -r -d '' GIT_DIR; do
+      HP="$GIT_DIR/hooks/pre-commit"
+      if [ ! -L "$HP" ] || [ "$(readlink "$HP" 2>/dev/null)" != "$HOOK_SCRIPT" ]; then
+          mkdir -p "$GIT_DIR/hooks"
+          [ -f "$HP" ] && [ ! -L "$HP" ] && cp "$HP" "${HP}.backup"
+          ln -sf "$HOOK_SCRIPT" "$HP"
+          ADDED=$((ADDED + 1))
+      fi
+  done < <(find "$ROOT" -maxdepth 6 -name ".git" -type d -print0 2>/dev/null)
+done
 [ "$ADDED" -gt 0 ] && \
     echo "{\"ts\":\"$TS\",\"type\":\"hook_backstop\",\"added\":$ADDED}" >> "$LOG"
 HB_EOF
@@ -316,6 +369,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>$HEARTBEAT_SCRIPT</string></array>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$AGENT_DIR/heartbeat.log</string>
   <key>StandardErrorPath</key><string>$AGENT_DIR/heartbeat.log</string>
 </dict></plist>
 PLIST_EOF
@@ -332,11 +386,25 @@ PLIST_EOF
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>$SCAN_RUNNER</string></array>
   <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$AGENT_DIR/scan.log</string>
   <key>StandardErrorPath</key><string>$AGENT_DIR/scan.log</string>
 </dict></plist>
 PLIST_EOF
   launchctl unload "$PLIST_SCAN" 2>/dev/null || true
   launchctl load  "$PLIST_SCAN" 2>/dev/null || true
+
+  # macOS 13+ shows a "Background Items Added" notification.
+  # If the user disables it, heartbeat/scan silently stop.
+  # Write to agent.log so the warning is visible even in DMG/double-click installs
+  # where no terminal output is shown.
+  major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
+  if [ "${major:-0}" -ge 13 ]; then
+    _info "macOS will show 'PatronAI Background Items Added' notification."
+    _info "Ensure it stays enabled in System Settings > General > Login Items."
+    _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    echo "{\"ts\":\"$_ts\",\"type\":\"install_warning\",\"msg\":\"macOS 13+: ensure PatronAI is enabled in System Settings > General > Login Items or heartbeat/scan will not run\"}" \
+      >> "$AGENT_DIR/agent.log"
+  fi
 else
   # Linux — crontab
   ( crontab -l 2>/dev/null | grep -v patronai
@@ -350,7 +418,8 @@ curl -fsSL -X PUT "$STATUS_PUT_URL" -H "Content-Type: application/json" \
   -d "{\"token\":\"$TOKEN\",\"status\":\"installed\",\"device_id\":\"$(hostname)\",\"installed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
   >/dev/null 2>&1 || true
 
-# ── Run first scan immediately ────────────────────────────────
+# ── Run first heartbeat + scan immediately ───────────────────────
+bash "$HEARTBEAT_SCRIPT" &
 bash "$SCAN_RUNNER" &
 
 # ── Drop the recipient-side diagnose script ──────────────────

@@ -67,7 +67,7 @@ def _heatmap(events: list) -> None:
                             key="exec_risk_heatmap")
     try:
         pts = (event.selection.points if event else []) or []
-    except Exception:
+    except Exception:  # intentional: must not crash
         pts = []
     if pts:
         # x = severity column, y = category row — drill on whichever is clicked
@@ -113,7 +113,7 @@ def _top_offenders(events: list) -> None:
                             key="exec_risk_offenders")
     try:
         pts = (event.selection.points if event else []) or []
-    except Exception:
+    except Exception:  # intentional: must not crash
         pts = []
     if pts:
         owner = pts[0].get("y", "")

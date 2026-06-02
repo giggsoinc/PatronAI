@@ -40,7 +40,7 @@ def _users_store():
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
         from store.users_store import UsersStore
         return UsersStore(BUCKET, REGION)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return None
 
 
@@ -57,7 +57,7 @@ def _resolve_role(email: str) -> tuple:
             if not store.read_all():                # empty store + env vars → fallback
                 return _env_fallback(email)
             return "", False                       # store has users but not this one
-        except Exception:
+        except Exception:  # intentional: must not crash
             return _env_fallback(email)
     return _env_fallback(email)
 
@@ -95,7 +95,7 @@ def _render_login() -> None:
 
     try:
         st.image("assets/branding/patronai-logo.png", width=240)
-    except Exception:
+    except Exception:  # intentional: must not crash
         st.title("PatronAI")
     st.caption(f"Settings — {company}" if company else "Settings")
     st.divider()

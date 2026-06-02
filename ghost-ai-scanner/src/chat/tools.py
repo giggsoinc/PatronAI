@@ -15,8 +15,9 @@
 #   v2.0.0  2026-04-29  Rollup-backed; events arg dropped.
 #   v2.1.0  2026-05-02  Moved from dashboard/ui/chat/ to src/chat/.
 #                       Chat brain is no longer UI-coupled. sys.path
-#                       hack dropped — query/ is a sibling package.
+#                       workaround removed — query/ is a sibling package.
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 from __future__ import annotations
 

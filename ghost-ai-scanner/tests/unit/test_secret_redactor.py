@@ -46,7 +46,7 @@ def test_anthropic_key_is_redacted():
 
 def test_aws_access_key_is_redacted():
     ns = _load("scan_redactor.py.frag")
-    out = ns["_redact_text"]("aws AKIAIOSFODNN7EXAMPLE used")
+    out = ns["_redact_text"]("aws AKIAIOSFODNN7EXAMPLE used")  # noqa: SECRET — test data, not a real key
     assert "AKIA" not in out
 
 

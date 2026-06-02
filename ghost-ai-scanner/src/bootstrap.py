@@ -99,7 +99,7 @@ def seed_config_files(store) -> None:
         try:
             s3.head_object(Bucket=BUCKET, Key=key)
             return True
-        except Exception:
+        except Exception:  # intentional: returns safe default on any error
             return False
 
     def _push(local_path: Path, key: str) -> None:

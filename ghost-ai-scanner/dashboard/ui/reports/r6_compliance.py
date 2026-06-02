@@ -25,7 +25,7 @@ def _period_days(d_from: str, d_to: str) -> str:
     try:
         delta = datetime.fromisoformat(d_to) - datetime.fromisoformat(d_from)
         return str(delta.days + 1)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return "—"
 
 

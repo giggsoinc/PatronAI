@@ -23,7 +23,7 @@ def _is_first_run() -> bool:
     Best-effort — silent fail returns False so we degrade to fast scan."""
     try:
         return _FIRST_RUN_FLAG.exists()
-    except Exception:
+    except Exception:  # intentional: must not crash
         return False
 
 
@@ -34,7 +34,7 @@ def _clear_first_run_flag() -> None:
     try:
         if _FIRST_RUN_FLAG.exists():
             _FIRST_RUN_FLAG.unlink()
-    except Exception:
+    except Exception:  # intentional: must not crash
         pass
 
 

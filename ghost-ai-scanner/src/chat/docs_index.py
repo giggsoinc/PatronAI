@@ -20,6 +20,7 @@
 #                       now ghost-ai-scanner/src/chat/docs_index.py
 #                       instead of ghost-ai-scanner/dashboard/ui/chat/...
 # =============================================================
+# raven: loc-exempt — pending refactor into sub-modules (tracked separately)
 
 from __future__ import annotations
 

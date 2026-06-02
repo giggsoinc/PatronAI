@@ -63,7 +63,7 @@ def load_audit_log(s3, bucket: str, limit: int = 50) -> list:
                             Key=_AUDIT_KEY)["Body"].read().decode()
         lines = [ln for ln in raw.strip().split("\n") if ln][-limit:]
         return [json.loads(ln) for ln in reversed(lines)]
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
 
 
@@ -102,7 +102,7 @@ def _append_audit(s3, bucket: str, line: str) -> None:
         try:
             existing = s3.get_object(
                 Bucket=bucket, Key=_AUDIT_KEY)["Body"].read().decode()
-        except Exception:
+        except Exception:  # intentional: must not crash
             existing = ""
         s3.put_object(Bucket=bucket, Key=_AUDIT_KEY,
                       Body=(existing + line).encode(),

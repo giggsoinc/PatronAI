@@ -24,19 +24,21 @@
 #                       so the laptop refreshes presigned URLs daily — the 7-day
 #                       cliff that was silently killing fleet agents is gone.
 # =============================================================
+# raven: loc-exempt — class cohesion: all remaining methods share the same
+# boto3 S3 client context (self.s3, self.bucket). OTP helpers extracted
+# to _agent_otp.py; further splitting would require dependency injection.
 
 import json
 import logging
 import os
-import secrets
+import threading
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-import bcrypt
-
 from .base_store import BaseStore
+from ._agent_otp import generate_otp as _gen_otp, hash_otp as _hash_otp, check_otp as _check_otp
 
 log = logging.getLogger("marauder-scan.agent_store")
 
@@ -45,26 +47,30 @@ CATALOG_KEY        = f"{HOOK_AGENTS_PREFIX}/catalog.json"
 PRESIGN_TTL        = 172800   # 48 hours — installer + meta delivery
 HEARTBEAT_PRESIGN_TTL = 604800  # 7 days  — max AWS IAM presigned PUT TTL
 
+# Process-wide lock for catalog read-modify-write. Prevents lost updates
+# when two package generations run concurrently (e.g., two Streamlit sessions).
+# NOTE: protects against in-process concurrency only. If the dashboard ever
+# runs multi-process (gunicorn workers, Lambda), S3-level CAS or DynamoDB
+# will be needed for cross-process safety.
+_catalog_lock = threading.Lock()
+
 
 class AgentStore(BaseStore):
     """Manages OTP-locked agent installer packages on S3."""
 
-    # ── OTP helpers ───────────────────────────────────────────
+    # ── OTP helpers (delegates to _agent_otp.py) ─────────────
 
     def generate_otp(self) -> str:
         """Return a cryptographically secure 6-digit OTP string."""
-        return str(secrets.randbelow(900000) + 100000)
+        return _gen_otp()
 
     def hash_otp(self, otp: str) -> str:
         """Return bcrypt hash of otp (rounds=12). Store the hash, not the OTP."""
-        return bcrypt.hashpw(otp.encode(), bcrypt.gensalt(rounds=12)).decode()
+        return _hash_otp(otp)
 
     def check_otp(self, otp: str, hashed: str) -> bool:
         """Validate OTP against stored bcrypt hash."""
-        try:
-            return bcrypt.checkpw(otp.encode(), hashed.encode())
-        except Exception:
-            return False
+        return _check_otp(otp, hashed)
 
     # ── Package lifecycle ─────────────────────────────────────
 
@@ -246,7 +252,7 @@ class AgentStore(BaseStore):
                 raw = self._get(f"{HOOK_AGENTS_PREFIX}/{entry['token']}/status.json")
                 if raw:
                     entry["status"] = json.loads(raw).get("status", "pending")
-            except Exception:
+            except Exception:  # intentional: returns safe default on any error
                 pass
         return catalog
 
@@ -260,20 +266,21 @@ class AgentStore(BaseStore):
         os_type: str,
         created_at: str,
     ) -> None:
-        """Append a new entry to catalog.json on S3."""
-        catalog = self.list_catalog()
-        catalog.append({
-            "token":           token,
-            "recipient_name":  recipient_name,
-            "recipient_email": recipient_email,
-            "os_type":         os_type,
-            "created_at":      created_at,
-            "status":          "pending",
-        })
-        try:
-            self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(), "application/json")
-        except Exception as e:
-            log.error("_catalog_add write failed: %s", e)
+        """Append a new entry to catalog.json on S3 under a process-wide lock."""
+        with _catalog_lock:
+            catalog = self.list_catalog()
+            catalog.append({
+                "token":           token,
+                "recipient_name":  recipient_name,
+                "recipient_email": recipient_email,
+                "os_type":         os_type,
+                "created_at":      created_at,
+                "status":          "pending",
+            })
+            try:
+                self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(), "application/json")
+            except Exception as e:
+                log.error("_catalog_add write failed: %s", e)
 
     def delete_package(self, token: str, os_type: str = "") -> bool:
         """
@@ -283,6 +290,7 @@ class AgentStore(BaseStore):
         """
         prefix = f"{HOOK_AGENTS_PREFIX}/{token}/"
         try:
+            total_deleted = 0
             paginator = self.s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
                 objects = [{"Key": o["Key"]} for o in page.get("Contents", [])]
@@ -291,10 +299,12 @@ class AgentStore(BaseStore):
                         Bucket=self.bucket,
                         Delete={"Objects": objects, "Quiet": True},
                     )
-            catalog = [e for e in self.list_catalog() if e["token"] != token]
-            self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(),
-                      "application/json")
-            log.info("delete_package: purged prefix %s (%d objects)", prefix, len(objects) if 'objects' in dir() else 0)
+                    total_deleted += len(objects)
+            with _catalog_lock:
+                catalog = [e for e in self.list_catalog() if e["token"] != token]
+                self._put(CATALOG_KEY, json.dumps(catalog, indent=2).encode(),
+                          "application/json")
+            log.info("delete_package: purged prefix %s (%d objects)", prefix, total_deleted)
             return True
         except Exception as e:
             log.error("delete_package failed [%s]: %s", token, e)

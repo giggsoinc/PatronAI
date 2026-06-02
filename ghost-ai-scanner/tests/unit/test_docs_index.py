@@ -115,13 +115,15 @@ def synthetic_index(tmp_path, monkeypatch):
         "# PatronAI Linux Agent\n\n"
         "To install the Linux agent run setup_agent.sh.\n\n"
         "To uninstall the Linux agent: rm -rf ~/.patronai && "
-        "crontab -r\n\nUninstall removes everything cleanly."
+        "crontab -r\n\nUninstall removes everything cleanly.",
+        encoding="utf-8",
     )
     (docs / "windows.md").write_text(
         "# PatronAI Windows Agent\n\n"
         "Windows install uses setup_agent.ps1 in PowerShell.\n\n"
         "Windows uninstall: Add or Remove Programs → PatronAI Agent → "
-        "Uninstall.\n\nThe scheduled task is also removed."
+        "Uninstall.\n\nThe scheduled task is also removed.",
+        encoding="utf-8",
     )
     (docs / "mac.html").write_text(
         "<html><head><meta charset='UTF-8'><style>x</style></head>"
@@ -129,7 +131,8 @@ def synthetic_index(tmp_path, monkeypatch):
         "<p>To install on Mac, run bash setup_agent.sh.</p>"
         "<p>To uninstall on Mac: rm -rf ~/.patronai/ and remove the launchd "
         "plist at ~/Library/LaunchAgents/com.giggso.patronai.plist. "
-        "Then launchctl unload that plist file.</p></body></html>"
+        "Then launchctl unload that plist file.</p></body></html>",
+        encoding="utf-8",
     )
     # Override the doc roots
     monkeypatch.setattr("chat.docs_index._DOC_ROOTS", [docs])

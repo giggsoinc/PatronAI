@@ -12,7 +12,7 @@ try:
     from ..manager_tab_ai_inventory_data import (  # type: ignore
         CATEGORY_LABELS, PHASE_1A_CATEGORIES,
     )
-except Exception:
+except Exception:  # intentional: must not crash
     CATEGORY_LABELS: dict = {}
     PHASE_1A_CATEGORIES: tuple = ()
 

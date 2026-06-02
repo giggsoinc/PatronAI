@@ -45,7 +45,7 @@ def _scan_workflow_files() -> list:
                 try:
                     size = child.stat().st_size
                     mtime = int(child.stat().st_mtime)
-                except Exception:
+                except Exception:  # intentional: must not crash
                     size, mtime = 0, 0
                 finding = {
                     "type":         "agent_workflow",
@@ -58,7 +58,7 @@ def _scan_workflow_files() -> list:
                 safe = _safe_finding(finding)
                 if not _has_unredacted_secret(safe):
                     findings.append(safe)
-        except Exception:
+        except Exception:  # intentional: must not crash
             continue
     return findings
 
@@ -79,7 +79,7 @@ def _scan_crontab() -> list:
         out = subprocess.check_output(
             ["crontab", "-l"], stderr=subprocess.DEVNULL, text=True, timeout=5,
         )
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
     findings: list = []
     for line in out.splitlines():
@@ -117,7 +117,7 @@ def _scan_launchd() -> list:
         for plist in root.glob("*.plist"):
             try:
                 text = plist.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+            except Exception:  # intentional: must not crash
                 continue
             if not _AI_SCHEDULE_RE.search(text):
                 continue
@@ -130,7 +130,7 @@ def _scan_launchd() -> list:
             safe = _safe_finding(finding)
             if not _has_unredacted_secret(safe):
                 findings.append(safe)
-    except Exception:
+    except Exception:  # intentional: must not crash
         return findings
     return findings
 

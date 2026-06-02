@@ -12,6 +12,10 @@
 #   v1.0.0  2026-04-25  Initial. Group 2 — fragment refactor.
 #   v1.1.0  2026-04-25  Step 0 — full identity capture from config.json.
 # =============================================================
+# ── Globals provided to all .frag files by this header ────────
+# Path (pathlib), re, json, os, sys, time, platform, subprocess,
+# socket, hashlib, shlex — all imported below; frags may use them
+# without re-importing.
 
 import json, os, platform, re, shutil, socket, sqlite3, subprocess, uuid
 from pathlib import Path
@@ -30,7 +34,7 @@ def _load_config() -> dict:
     """Read ~/.patronai/config.json; return {} if missing or unreadable."""
     try:
         return json.loads((AGENT_DIR / "config.json").read_text())
-    except Exception:
+    except Exception:  # intentional: must not crash
         return {}
 
 
@@ -39,7 +43,7 @@ def _current_ips() -> list:
     try:
         host = socket.gethostname()
         return sorted({ip for ip in socket.gethostbyname_ex(host)[2] if not ip.startswith("127.")})
-    except Exception:
+    except Exception:  # intentional: must not crash
         return []
 
 

@@ -7,6 +7,10 @@
 # USAGE: powershell -ExecutionPolicy Bypass -File setup_agent.ps1
 # REQUIRES: PowerShell 5.1+, Python 3 (with bcrypt installed)
 # =============================================================
+# Bug #7 fix: accept OTP as parameter for non-interactive (EXE) installs
+# param() MUST be the first executable statement — before $ErrorActionPreference.
+param([string]$Otp)
+
 $ErrorActionPreference = "Stop"
 
 $MetaUrl           = "{{META_URL}}"
@@ -29,12 +33,34 @@ $ConfigPath = Join-Path $AgentDir "config.json"
 function Write-Info($msg) { Write-Host "[patronai] $msg" }
 function Write-Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
 
-# ── Validate python3 / bcrypt ─────────────────────────────────
-try { python --version *>$null } catch { Write-Fail "Python 3 is required. Install from python.org" }
-$bcryptOk = python -c "import bcrypt; print('ok')" 2>$null
+# BOM-free UTF-8 writer — PS 5.1's Set-Content -Encoding UTF8 emits a BOM
+# which breaks git shebangs and Python's json.loads on Windows.
+function Write-Utf8NoBom($Path, $Content) {
+    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
+# ── Validate Python 3 ─────────────────────────────────────────
+# Bug #6 fix: detect real Python, skip Microsoft Store stub
+$PyExe = $null
+foreach ($Cand in @("py", "python", "python3")) {
+    $resolved = Get-Command $Cand -ErrorAction SilentlyContinue
+    if ($resolved -and ($resolved.Source -notmatch "WindowsApps")) {
+        $ErrorActionPreference = "Continue"
+        $v = & $resolved.Source --version 2>&1
+        $ErrorActionPreference = "Stop"
+        if ($LASTEXITCODE -eq 0 -and $v -match "Python 3") { $PyExe = $resolved.Source; break }
+    }
+}
+if (-not $PyExe) { Write-Fail "Python 3 is required. Install from https://www.python.org/downloads/windows/" }
+Write-Info "Using Python at: $PyExe"
+
+# Bug #8 fix: use python -m pip instead of bare pip
+$ErrorActionPreference = "Continue"
+$bcryptOk = & $PyExe -c "import bcrypt; print('ok')" 2>$null
+$ErrorActionPreference = "Stop"
 if ($bcryptOk -ne "ok") {
     Write-Info "Installing bcrypt..."
-    pip install --quiet "bcrypt>=4.0.0" | Out-Null
+    & $PyExe -m pip install --user "bcrypt>=4.0.0" | Out-Null
 }
 
 # ── Prompt for OTP ───────────────────────────────────────────
@@ -44,7 +70,7 @@ Write-Host "========================"
 Write-Host "Recipient : $RecipientName"
 Write-Host "Company   : $Company"
 Write-Host ""
-$OtpInput = Read-Host "Enter your 6-digit installation OTP"
+$OtpInput = if ($Otp) { $Otp } else { Read-Host "Enter your 6-digit installation OTP" }
 
 if ($OtpInput -notmatch '^\d{6}$') {
     Write-Fail "OTP must be exactly 6 digits."
@@ -52,24 +78,27 @@ if ($OtpInput -notmatch '^\d{6}$') {
 
 # ── Download and validate meta ────────────────────────────────
 Write-Info "Validating OTP..."
-$TmpMeta = Join-Path $env:TEMP "patronai-meta-$Token.json"
+$TmpMeta = [System.IO.Path]::GetTempFileName()
 try {
-    Invoke-WebRequest -Uri $MetaUrl -OutFile $TmpMeta -TimeoutSec 30
+    Invoke-WebRequest -Uri $MetaUrl -OutFile $TmpMeta -TimeoutSec 30 -UseBasicParsing
 } catch {
+    Remove-Item -Path $TmpMeta -ErrorAction SilentlyContinue
     Write-Fail "Cannot reach installation server. URL may have expired."
 }
 
-$OtpHash = python -c "import json; print(json.load(open(r'$TmpMeta'))['otp_hash'])"
-$Expires  = python -c "import json; print(json.load(open(r'$TmpMeta'))['expires_at'])"
+try {
 
-$Expired = python -c @"
+$OtpHash = & $PyExe -c "import json; print(json.load(open(r'$TmpMeta'))['otp_hash'])"
+$Expires  = & $PyExe -c "import json; print(json.load(open(r'$TmpMeta'))['expires_at'])"
+
+$Expired = & $PyExe -c @"
 from datetime import datetime, timezone
 e = datetime.fromisoformat('$Expires')
 print('yes' if datetime.now(timezone.utc) > e else 'no')
 "@
 if ($Expired -eq "yes") { Write-Fail "Installation package has expired. Request a new one." }
 
-$Valid = python -c @"
+$Valid = & $PyExe -c @"
 import bcrypt
 try:
     ok = bcrypt.checkpw(b'$OtpInput', b'$OtpHash')
@@ -97,18 +126,21 @@ $Config = @{
     device_uuid = $DeviceUuid
     mac_primary = $MacPrimary.ToLower()
     agent_dir   = $AgentDir
+    python_exe  = $PyExe
 } | ConvertTo-Json
-$Config | Set-Content -Path $ConfigPath -Encoding UTF8
+Write-Utf8NoBom $ConfigPath $Config
 
 # Persist presigned URLs + URL-refresh endpoint + authorised list fallback.
-$HeartbeatPutUrl   | Set-Content -Path (Join-Path $AgentDir "heartbeat_url.txt")      -Encoding UTF8
-$ScanPutUrl        | Set-Content -Path (Join-Path $AgentDir "scan_url.txt")            -Encoding UTF8
-$AuthorizedGetUrl  | Set-Content -Path (Join-Path $AgentDir "authorized_url.txt")      -Encoding UTF8
-$UrlsRefreshUrl    | Set-Content -Path (Join-Path $AgentDir "urls_refresh_url.txt")    -Encoding UTF8
+# Write-Utf8NoBom used throughout — Set-Content -Encoding UTF8 emits a BOM on PS 5.1
+# which would corrupt the URL if read by any non-PowerShell tool (Python, curl, etc.).
+Write-Utf8NoBom (Join-Path $AgentDir "heartbeat_url.txt")   $HeartbeatPutUrl
+Write-Utf8NoBom (Join-Path $AgentDir "scan_url.txt")        $ScanPutUrl
+Write-Utf8NoBom (Join-Path $AgentDir "authorized_url.txt")  $AuthorizedGetUrl
+Write-Utf8NoBom (Join-Path $AgentDir "urls_refresh_url.txt") $UrlsRefreshUrl
 
 # Local action log (one JSON-line per PUT). Replaces silent failure.
 New-Item -ItemType File -Force -Path (Join-Path $AgentDir "agent.log") | Out-Null
-$AuthorizedDomains | Set-Content -Path (Join-Path $AgentDir "authorized_domains.txt")  -Encoding UTF8
+Write-Utf8NoBom (Join-Path $AgentDir "authorized_domains") $AuthorizedDomains
 
 # Phase 1A — first-run flag. scan_first_run.py.frag reads it (IS_FIRST_RUN);
 # the footer clears it after a successful payload print so subsequent scans
@@ -117,7 +149,7 @@ New-Item -ItemType File -Force -Path (Join-Path $AgentDir "first_run.flag") | Ou
 
 # ── Write pre-commit hook script ──────────────────────────────
 $HookScript = Join-Path $AgentDir "pre_commit_hook.ps1"
-@'
+$_HookContent = @'
 # PatronAI pre-commit hook — PowerShell
 $ConfigPath = Join-Path $env:USERPROFILE ".patronai\config.json"
 if (-not (Test-Path $ConfigPath)) { exit 0 }
@@ -139,17 +171,19 @@ $Payload   = @{event_type="GIT_DIFF_SIGNAL";source="patronai_git_hook_ps";
 $Key = "ocsf/agent/git-diffs/$DeviceId-$Timestamp.json"
 aws s3 cp - "s3://$Bucket/$Key" --region $Region --content-type "application/json" --quiet 2>$null
 exit 0
-'@ | Set-Content -Path $HookScript -Encoding UTF8
+'@
+Write-Utf8NoBom $HookScript $_HookContent
 
 # Install hook into git repos found under user profile
+# -Force is required because .git directories have the Hidden attribute on Windows
 $InstallCount = 0
 $HookBody = "#!/bin/sh`npowershell -ExecutionPolicy Bypass -File `"$HookScript`""
-Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 4 -Filter ".git" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 6 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
     $HooksDir = Join-Path $_.FullName "hooks"
     if (-not (Test-Path $HooksDir)) { New-Item -ItemType Directory -Path $HooksDir | Out-Null }
     $HookPath = Join-Path $HooksDir "pre-commit"
     if (Test-Path $HookPath) { Copy-Item $HookPath "$HookPath.pre-patronai-backup" -Force }
-    $HookBody | Set-Content -Path $HookPath -Encoding UTF8
+    Write-Utf8NoBom $HookPath $HookBody
     $InstallCount++
 }
 
@@ -162,11 +196,11 @@ if ($ExistingTpl -and $ExistingTpl -ne $TemplateDir) {
     $Expanded = $ExistingTpl -replace '^~', $env:USERPROFILE
     $TgtHooks = Join-Path $Expanded "hooks"
     New-Item -ItemType Directory -Force -Path $TgtHooks | Out-Null
-    $HookBody | Set-Content -Path (Join-Path $TgtHooks "pre-commit") -Encoding UTF8
+    Write-Utf8NoBom (Join-Path $TgtHooks "pre-commit") $HookBody
     Write-Info "init.templateDir preserved ($ExistingTpl); hook copied alongside."
 } else {
     New-Item -ItemType Directory -Force -Path $TemplateHooks | Out-Null
-    $HookBody | Set-Content -Path (Join-Path $TemplateHooks "pre-commit") -Encoding UTF8
+    Write-Utf8NoBom (Join-Path $TemplateHooks "pre-commit") $HookBody
     & git config --global init.templateDir $TemplateDir | Out-Null
     Write-Info "init.templateDir set — every new git init/clone gets the hook."
 }
@@ -175,9 +209,17 @@ if ($ExistingTpl -and $ExistingTpl -ne $TemplateDir) {
 # Runs every 30 min. Multi-surface: packages, processes, browsers,
 # IDE plugins, containers (image+logs), shell history. Scan logic
 # lives in agent/install/scan_*.py.frag — same Python is inlined
-# into the bash and PowerShell installers via {{INLINE_SCAN_PYTHON}}.
+# into the bash and PowerShell installers via the scan fragment loader.
+# Bug #9 fix: write scan Python to a file instead of double-quoted here-string
+# (avoids PowerShell expanding $HOME, $name etc. inside the Python source)
 $ScanScript = Join-Path $AgentDir "scan.ps1"
-@'
+$ScanPyFile = Join-Path $AgentDir "scan.py"
+$_ScanPyContent = @'
+{{INLINE_SCAN_PYTHON}}
+'@
+Write-Utf8NoBom $ScanPyFile $_ScanPyContent
+
+$_ScanContent = @'
 $AgentDir    = Join-Path $env:USERPROFILE ".patronai"
 $ConfigPath  = Join-Path $AgentDir "config.json"
 $ScanUrlFile = Join-Path $AgentDir "scan_url.txt"
@@ -195,27 +237,26 @@ if (Test-Path $AuthUrlFile) {
         try {
             $Live = Invoke-WebRequest -Uri $AuthGetUrl -TimeoutSec 10 -UseBasicParsing
             if ($Live.Content) {
-                $Live.Content | Set-Content -Path (Join-Path $AgentDir "authorized_domains.txt") -Encoding UTF8
+                [System.IO.File]::WriteAllText((Join-Path $AgentDir "authorized_domains"), $Live.Content, [System.Text.UTF8Encoding]::new($false))
             }
         } catch { <# fallback to local file #> }
     }
 }
 
-# Pass token + company into the embedded Python via env so $TOKEN/$COMPANY
-# placeholders in scan_header.py.frag bind to the live values.
 $env:PATRONAI_TOKEN   = $Cfg.token
 $env:PATRONAI_COMPANY = $Cfg.company
-$Result = python -c @"
-{{INLINE_SCAN_PYTHON}}
-"@
+$ScanPy  = Join-Path $AgentDir "scan.py"
+$PyExe   = if ($Cfg.python_exe -and (Test-Path $Cfg.python_exe)) { $Cfg.python_exe } else { "python" }
+$Result  = & $PyExe $ScanPy
 
 if ($Result) {
     try {
         Invoke-WebRequest -Uri $ScanUrl -Method Put -Body $Result `
-            -ContentType "application/json" -TimeoutSec 30 | Out-Null
+            -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing | Out-Null
     } catch { <# non-fatal #> }
 }
-'@ | Set-Content -Path $ScanScript -Encoding UTF8
+'@
+Write-Utf8NoBom $ScanScript $_ScanContent
 
 # ── Report install status ─────────────────────────────────────
 $StatusPayload = @{
@@ -227,12 +268,12 @@ $StatusPayload = @{
 
 try {
     Invoke-WebRequest -Uri $StatusPutUrl -Method Put -Body $StatusPayload `
-        -ContentType "application/json" -TimeoutSec 15 | Out-Null
+        -ContentType "application/json" -TimeoutSec 15 -UseBasicParsing | Out-Null
 } catch { <# non-fatal #> }
 
 # ── Write heartbeat script (URL refresh + identity + structured log) ──
 $HeartbeatScript = Join-Path $AgentDir "heartbeat.ps1"
-@'
+$_HbContent = @'
 $AgentDir    = Join-Path $env:USERPROFILE ".patronai"
 $ConfigPath  = Join-Path $AgentDir "config.json"
 $UrlFile     = Join-Path $AgentDir "heartbeat_url.txt"
@@ -247,9 +288,10 @@ if (Test-Path $RefreshFile) {
     if ($RefreshUrl) {
         try {
             $Bundle = (Invoke-WebRequest -Uri $RefreshUrl -TimeoutSec 10 -UseBasicParsing).Content | ConvertFrom-Json
-            if ($Bundle.heartbeat_put_url)  { $Bundle.heartbeat_put_url  | Set-Content -Path $UrlFile -Encoding UTF8 }
-            if ($Bundle.scan_put_url)       { $Bundle.scan_put_url       | Set-Content -Path (Join-Path $AgentDir "scan_url.txt") -Encoding UTF8 }
-            if ($Bundle.authorized_get_url) { $Bundle.authorized_get_url | Set-Content -Path (Join-Path $AgentDir "authorized_url.txt") -Encoding UTF8 }
+            $NoBom  = [System.Text.UTF8Encoding]::new($false)
+            if ($Bundle.heartbeat_put_url)  { [System.IO.File]::WriteAllText($UrlFile,                              $Bundle.heartbeat_put_url,  $NoBom) }
+            if ($Bundle.scan_put_url)       { [System.IO.File]::WriteAllText((Join-Path $AgentDir "scan_url.txt"),  $Bundle.scan_put_url,       $NoBom) }
+            if ($Bundle.authorized_get_url) { [System.IO.File]::WriteAllText((Join-Path $AgentDir "authorized_url.txt"), $Bundle.authorized_get_url, $NoBom) }
         } catch { <# best-effort #> }
     }
 }
@@ -292,19 +334,19 @@ $Ts = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 "{`"ts`":`"$Ts`",`"type`":`"heartbeat`",`"http_status`":$HttpStatus}" | Add-Content -Path $Log
 
 # Step 0.1 — hook coverage backstop. Walk every .git under USERPROFILE and
-# ensure our pre-commit shim is in place. Cheap; runs every 5 min.
+# ensure our pre-commit shim is in place.
 $HookScript = Join-Path $AgentDir "pre_commit_hook.ps1"
 if (Test-Path $HookScript) {
     $Shim  = "#!/bin/sh`npowershell -ExecutionPolicy Bypass -File `"$HookScript`""
     $Added = 0
-    Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 4 -Filter ".git" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem -Path $env:USERPROFILE -Recurse -Depth 6 -Filter ".git" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
         $HD = Join-Path $_.FullName "hooks"
         if (-not (Test-Path $HD)) { New-Item -ItemType Directory -Path $HD | Out-Null }
         $HP = Join-Path $HD "pre-commit"
         $Want = ($Shim -replace "`r","")
         if ((-not (Test-Path $HP)) -or ((Get-Content $HP -Raw -ErrorAction SilentlyContinue) -ne $Want)) {
             if (Test-Path $HP) { Copy-Item $HP "$HP.pre-patronai-backup" -Force -ErrorAction SilentlyContinue }
-            $Shim | Set-Content -Path $HP -Encoding UTF8
+            [System.IO.File]::WriteAllText($HP, $Shim, [System.Text.UTF8Encoding]::new($false))
             $Added++
         }
     }
@@ -312,20 +354,44 @@ if (Test-Path $HookScript) {
         "{`"ts`":`"$Ts`",`"type`":`"hook_backstop`",`"added`":$Added}" | Add-Content -Path $Log
     }
 }
-'@ | Set-Content -Path $HeartbeatScript -Encoding UTF8
+'@
+Write-Utf8NoBom $HeartbeatScript $_HbContent
 
 # ── Register Task Scheduler tasks ────────────────────────────
 function Register-PatronAITask($TaskName, $ScriptPath, $IntervalMinutes, $Desc) {
-    $Action   = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
-    $Trigger  = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-        -Once -At (Get-Date)
-    $Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
-        -StartWhenAvailable -DontStopIfGoingOnBatteries -RunOnlyIfNetworkAvailable
+    $Xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT${IntervalMinutes}M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals><Principal><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-ExecutionPolicy Bypass -WindowStyle Hidden -File "$ScriptPath"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
     try {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger `
-            -Settings $Settings -Description $Desc -RunLevel Limited | Out-Null
+        Register-ScheduledTask -TaskName $TaskName -Xml $Xml -Force | Out-Null
         Write-Info "$TaskName registered (every $IntervalMinutes min)."
     } catch {
         Write-Info "$TaskName registration failed: $_"
@@ -335,16 +401,20 @@ function Register-PatronAITask($TaskName, $ScriptPath, $IntervalMinutes, $Desc) 
 Register-PatronAITask "PatronAI-Heartbeat" $HeartbeatScript 5  "PatronAI liveness heartbeat"
 Register-PatronAITask "PatronAI-Scan"      $ScanScript      30 "PatronAI endpoint scan (packages/processes/browser)"
 
-# Run first scan immediately in background
+# Run first heartbeat + scan immediately in background
+Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$HeartbeatScript`"" -WindowStyle Hidden
 Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScanScript`"" -WindowStyle Hidden
 
-Remove-Item -Path $TmpMeta -ErrorAction SilentlyContinue
+} finally {
+    Remove-Item -Path $TmpMeta -ErrorAction SilentlyContinue
+}
 
 # ── Drop the recipient-side diagnose script ──────────────────
 $Diag = Join-Path $AgentDir "diagnose.ps1"
-@'
+$_DiagContent = @'
 {{INLINE_DIAGNOSE_PS1}}
-'@ | Set-Content -Path $Diag -Encoding UTF8
+'@
+Write-Utf8NoBom $Diag $_DiagContent
 
 Write-Host ""
 Write-Info "Installation complete."

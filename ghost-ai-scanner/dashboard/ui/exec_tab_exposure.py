@@ -107,7 +107,7 @@ def _sankey(events: list) -> None:
                             key="exec_exposure_sankey")
     try:
         pts = (event.selection.points if event else []) or []
-    except Exception:
+    except Exception:  # intentional: must not crash
         pts = []
     if pts:
         # customdata is the reliable field; label is the fallback

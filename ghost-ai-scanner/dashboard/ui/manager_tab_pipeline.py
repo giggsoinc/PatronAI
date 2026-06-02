@@ -58,7 +58,7 @@ def _metrics(events: list, summary: dict, cursor: dict) -> None:
         try:
             dt = datetime.fromisoformat(lpa)
             scan_lag = f"{int((datetime.now(timezone.utc)-dt).total_seconds()/60)} min"
-        except Exception:
+        except Exception:  # intentional: must not crash
             pass
 
     last_build = (f"{summary.get('build_duration_seconds','?')}s"

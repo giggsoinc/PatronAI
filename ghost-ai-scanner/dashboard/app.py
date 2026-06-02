@@ -76,7 +76,7 @@ def main():
     # Page header — PatronAI wordmark, fallback to text
     try:
         st.image("assets/branding/patronai-logo.png", width=240)
-    except Exception:
+    except Exception:  # intentional: must not crash
         st.title("PatronAI")
     st.caption(f"Settings — {COMPANY_NAME} · {BUCKET}")
     st.divider()

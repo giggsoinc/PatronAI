@@ -92,7 +92,7 @@ def test_non_workflow_files_are_skipped(tmp_path):
 def test_workflow_filename_capped_at_120_chars(tmp_path):
     n8n_dir = tmp_path / ".n8n" / "workflows"
     n8n_dir.mkdir(parents=True)
-    long_name = ("x" * 200) + ".json"
+    long_name = ("x" * 130) + ".json"  # 135 chars — exceeds 120 cap but fits Windows MAX_PATH
     (n8n_dir / long_name).write_text("{}")
     out = _run_workflows_scan(tmp_path)
     f = next(x for x in out if x["type"] == "agent_workflow")

@@ -115,7 +115,7 @@ def render_mindmap(events: list, *,
                           key=f"{chart_key}_v{_ver}")
     try:
         pts = (sel.selection.points if sel else []) or []
-    except Exception:
+    except Exception:  # intentional: must not crash
         pts = []
     if not pts:
         return

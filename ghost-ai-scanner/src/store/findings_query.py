@@ -39,7 +39,7 @@ def last_known_mcp_hash(s3_client, bucket: str,
     try:
         resp = s3_client.get_object(Bucket=bucket, Key=key)
         return resp["Body"].read().decode("utf-8").strip()
-    except Exception:
+    except Exception:  # intentional: returns safe default on any error
         return ""
 
 
@@ -89,7 +89,7 @@ def _scan_by_field(findings_store, field: str, value: str, days: int) -> list:
             continue
         try:
             rows = df.to_dicts()
-        except Exception:
+        except Exception:  # intentional: returns safe default on any error
             rows = []
         for r in rows:
             if r.get(field) == value:

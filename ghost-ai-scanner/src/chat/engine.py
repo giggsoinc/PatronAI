@@ -50,6 +50,7 @@ _SCOPED_TOOLS = {
     "get_shadow_ai_census":  get_shadow_ai_census,
     "get_recent_activity":   get_recent_activity,
     "compare_periods":       compare_periods,
+    
 }
 
 # Tools that take **kwargs only (no scope).

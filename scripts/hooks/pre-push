@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# =============================================================================
+# scripts/hooks/pre-push — PatronAI pre-push quality gate
+# Author: Giggso Inc / Ravi Venugopal
+# Purpose: Blocks push on quality/model/vuln failures; advisory PR review async
+# =============================================================================
+# | Date       | Author | Change                         |
+# |------------|--------|--------------------------------|
+# | 2026-05-08 | RV     | Initial implementation         |
+# =============================================================================
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PYTHON="${PYTHON:-python3}"
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  PatronAI Pre-Push Quality Gate${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
+
+# ── Step 1: Code Quality ─────────────────────────────────────────────────────
+echo ""
+echo -e "▶ ${CYAN}[1/3] Code Quality Check...${NC}"
+if ! "$PYTHON" "$REPO_ROOT/scripts/check_code_quality.py"; then
+    echo ""
+    echo -e "${RED}✗ PUSH BLOCKED — Code quality violations detected above.${NC}"
+    echo -e "${YELLOW}  → Fix all [QUALITY FAIL] items, re-stage, and retry push.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ Code quality passed${NC}"
+
+# ── Step 2: Code Model ───────────────────────────────────────────────────────
+echo ""
+echo -e "▶ ${CYAN}[2/3] Structural Model Check...${NC}"
+if ! "$PYTHON" "$REPO_ROOT/scripts/check_code_model.py"; then
+    echo ""
+    echo -e "${RED}✗ PUSH BLOCKED — Structural model violations detected above.${NC}"
+    echo -e "${YELLOW}  → Fix all [MODEL FAIL] items, re-stage, and retry push.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ Code model compliance passed${NC}"
+
+# ── Step 3: Vulnerability Scan ───────────────────────────────────────────────
+echo ""
+echo -e "▶ ${CYAN}[3/3] GPT-5.5 Vulnerability Scan...${NC}"
+if ! "$PYTHON" "$REPO_ROOT/scripts/vuln_scan.py"; then
+    echo ""
+    echo -e "${RED}✗ PUSH BLOCKED — CRITICAL/HIGH vulnerabilities found above.${NC}"
+    echo -e "${YELLOW}  → Fix all [VULN CRITICAL] and [VULN HIGH] items, re-stage, and retry push.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ Vulnerability scan passed${NC}"
+
+# ── All gates passed ─────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  ✓ All gates passed — push proceeding${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+echo ""
+
+# ── PR Review (async, advisory — never blocks push) ──────────────────────────
+"$PYTHON" "$REPO_ROOT/scripts/pr_review.py" &
+disown
+echo -e "${CYAN}  ↪ PR review running in background — check GitHub for comments${NC}"
+echo ""

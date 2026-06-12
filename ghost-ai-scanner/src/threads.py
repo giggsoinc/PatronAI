@@ -26,6 +26,7 @@ log = logging.getLogger("marauder-scan.threads")
 
 STREAMLIT_PORT = int(os.environ.get("STREAMLIT_PORT", "8501"))
 DEFAULT_INTERVAL = int(os.environ.get("SCAN_INTERVAL_SECS", "300"))
+INTEGRATION_API_PORT = int(os.environ.get("INTEGRATION_API_PORT", "8002")) 
 
 
 def scanner_loop(store, resolver, settings: dict, stop: threading.Event):
@@ -135,3 +136,35 @@ def streamlit_proc(stop: threading.Event):
 
     proc.terminate()
     log.info("Streamlit stopped")
+
+
+def integration_api_proc(stop: threading.Event):
+    """FastAPI integration API subprocess on INTEGRATION_API_PORT."""
+    base = os.path.dirname(os.path.dirname(__file__))
+    app_path = os.path.join(base, "api.py")
+    if not os.path.exists(app_path):
+        log.warning("api.py not found — integration API disabled")
+        return
+
+    cmd = [
+        sys.executable, "-m", "uvicorn", "api:app",
+        "--host", "0.0.0.0",  # nosec B104 — same pattern as Streamlit
+        "--port", str(INTEGRATION_API_PORT),
+        "--app-dir", base,
+        "--log-level", "info",
+    ]
+    log.info("Integration API on :%d", INTEGRATION_API_PORT)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    while not stop.is_set():
+        line = proc.stdout.readline()
+        if line:
+            log.debug("[integration_api] %s", line.decode().rstrip())
+        if proc.poll() is not None:
+            log.error("Integration API exited unexpectedly")
+            stop.set()
+            break
+        time.sleep(0.1)
+
+    proc.terminate()
+    log.info("Integration API stopped")

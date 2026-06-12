@@ -60,6 +60,7 @@ COPY agent/     ./agent/
 COPY assets/    ./assets/
 COPY docs/      ./docs/
 COPY main.py    .
+COPY api.py     .
 
 # Streamlit config — dark theme + server settings (from .streamlit/config.toml)
 RUN mkdir -p /root/.streamlit
@@ -70,7 +71,7 @@ RUN useradd -m -u 1000 scanner \
     && chown -R scanner:scanner /app /root/.streamlit
 USER scanner
 
-EXPOSE 8501
+EXPOSE 8501 8002
 
 # ── Marauder Scan — llama.cpp binaries ───────────────────────
 # Build llama-cli and llama-server from source.

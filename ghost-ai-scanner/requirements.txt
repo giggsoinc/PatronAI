@@ -57,3 +57,10 @@ rank-bm25>=0.2.2,<1.0.0        # Apache 2.0 — pure-Python BM25 over the
 # pytest-cov>=4.0.0
 # moto>=5.0.0                   # AWS mock for unit tests
 # localstack-client>=2.0.0      # LocalStack SDK for integration tests
+
+
+# ── HTTP / alerting ───────────────────────────────────────────
+fastapi>=0.115.0,<1.0.0       # MIT — integration REST API (integration_app.py)
+uvicorn[standard]>=0.32.0,<1.0.0  # BSD — ASGI server for integration_app.py
+email-validator>=2.0.0,<3.0.0  # MIT — EmailStr validation for FastAPI
+python-dotenv>=1.0.0         # Apache 2.0 — load .env into os.environ for local runs
